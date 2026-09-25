@@ -51,10 +51,10 @@ Comparing the parsed trees directly does not work, and the reason is a useful
 one: the reprinted source sits on different lines, so the spans rightly differ.
 The test compares what the trees mean, not where they came from.
 
-Known wart: a function literal nested inside another prints its body at the
-outer indentation, because the expression printer does not carry an indent.
-The output still reparses to the same thing; it is cosmetic and will be fixed
-when the printer is next touched.
+The expression printer carries the indentation of the statement holding it, so
+a function literal nested inside another lines its body up properly. It did not
+at first, and nothing caught it: the round trip still passed, because the output
+reparsed to the same thing. Only reading the printed sample showed it.
 
 ## Spans on everything from the start
 

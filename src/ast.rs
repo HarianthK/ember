@@ -133,16 +133,20 @@ fn print_block(body: &[Stmt], indent: usize) -> String {
 
 pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
     let line = match stmt {
-        Stmt::Let { name, value, .. } => format!("let {name} = {};", print_expr(value)),
-        Stmt::Expr(e) => format!("{};", print_expr(e)),
-        Stmt::Return { value: Some(e), .. } => format!("return {};", print_expr(e)),
+        Stmt::Let { name, value, .. } => format!("let {name} = {};", print_expr_at(value, indent)),
+        Stmt::Expr(e) => format!("{};", print_expr_at(e, indent)),
+        Stmt::Return { value: Some(e), .. } => format!("return {};", print_expr_at(e, indent)),
         Stmt::Return { value: None, .. } => "return;".to_string(),
         Stmt::If {
             cond,
             then,
             otherwise,
         } => {
-            let head = format!("if {} {}", print_expr(cond), print_block(then, indent));
+            let head = format!(
+                "if {} {}",
+                print_expr_at(cond, indent),
+                print_block(then, indent)
+            );
             if otherwise.is_empty() {
                 head
             } else {
@@ -150,14 +154,18 @@ pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
             }
         }
         Stmt::While { cond, body } => {
-            format!("while {} {}", print_expr(cond), print_block(body, indent))
+            format!(
+                "while {} {}",
+                print_expr_at(cond, indent),
+                print_block(body, indent)
+            )
         }
         Stmt::For {
             name, iter, body, ..
         } => {
             format!(
                 "for {name} in {} {}",
-                print_expr(iter),
+                print_expr_at(iter, indent),
                 print_block(body, indent)
             )
         }
@@ -167,6 +175,10 @@ pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
 }
 
 pub fn print_expr(expr: &Expr) -> String {
+    print_expr_at(expr, 0)
+}
+
+pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
     match expr {
         Expr::Number(n) => format!("{n}"),
         Expr::Str(s) => format!("{s:?}"),
@@ -182,34 +194,51 @@ pub fn print_expr(expr: &Expr) -> String {
         Expr::Map(pairs) => {
             let inner = pairs
                 .iter()
-                .map(|(k, v)| format!("{}: {}", print_expr(k), print_expr(v)))
+                .map(|(k, v)| format!("{}: {}", print_expr_at(k, indent), print_expr_at(v, indent)))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("{{{inner}}}")
         }
-        Expr::Unary(UnOp::Neg, e) => format!("(-{})", print_expr(e)),
-        Expr::Unary(UnOp::Not, e) => format!("(not {})", print_expr(e)),
+        Expr::Unary(UnOp::Neg, e) => format!("(-{})", print_expr_at(e, indent)),
+        Expr::Unary(UnOp::Not, e) => format!("(not {})", print_expr_at(e, indent)),
         // Parentheses on every binary node, so the printed form shows how it grouped.
         Expr::Binary(op, l, r) => {
-            format!("({} {} {})", print_expr(l), op.symbol(), print_expr(r))
+            format!(
+                "({} {} {})",
+                print_expr_at(l, indent),
+                op.symbol(),
+                print_expr_at(r, indent)
+            )
         }
         Expr::Call { callee, args, .. } => {
             format!(
                 "{}({})",
-                print_expr(callee),
+                print_expr_at(callee, indent),
                 args.iter().map(print_expr).collect::<Vec<_>>().join(", ")
             )
         }
         Expr::Index { target, index, .. } => {
-            format!("{}[{}]", print_expr(target), print_expr(index))
+            format!(
+                "{}[{}]",
+                print_expr_at(target, indent),
+                print_expr_at(index, indent)
+            )
         }
-        Expr::Field { target, name, .. } => format!("{}.{name}", print_expr(target)),
+        Expr::Field { target, name, .. } => format!("{}.{name}", print_expr_at(target, indent)),
         Expr::Func { name, params, body } => {
             let named = name.clone().unwrap_or_default();
-            format!("fn {named}({}) {}", params.join(", "), print_block(body, 0))
+            format!(
+                "fn {named}({}) {}",
+                params.join(", "),
+                print_block(body, indent)
+            )
         }
         Expr::Assign { target, value, .. } => {
-            format!("({} = {})", print_expr(target), print_expr(value))
+            format!(
+                "({} = {})",
+                print_expr_at(target, indent),
+                print_expr_at(value, indent)
+            )
         }
     }
 }

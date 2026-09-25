@@ -193,3 +193,16 @@ fn printing_and_reparsing_is_stable() {
         );
     }
 }
+
+// A function literal inside another used to print its body at the outer level.
+#[test]
+fn nested_functions_are_indented() {
+    let program =
+        parse("let counter = fn(start) { let n = start; return fn() { return n; }; };").unwrap();
+    let printed = print_stmts(&program, 0);
+    assert!(
+        printed.contains("    return n;"),
+        "inner body is not indented:\n{printed}"
+    );
+    assert_eq!(printed, print_stmts(&parse(&printed).unwrap(), 0));
+}
