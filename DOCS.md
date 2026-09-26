@@ -70,3 +70,61 @@ A brace starts both a block and a map literal, so `{}` at the start of a
 statement is ambiguous. The rule here is the usual one: in statement position a
 brace is a block, and a map literal there needs a parenthesis or an assignment
 in front of it. Worth knowing it is a choice rather than an oversight.
+
+## Phase 2: the virtual machine
+
+### Instructions are an enum, not bytes
+
+Real bytecode is a byte array: an opcode byte, then its operands packed after
+it, and the run loop reads bytes and decodes. Here an instruction is a Rust
+enum, `Op::Constant(u16)`, stored in a `Vec<Op>`. That costs space, four bytes
+for every instruction where most need one, and buys two things: the operands
+can never be misread, since an instruction and its operand cannot come apart,
+and the compiler refuses to build until every instruction is handled in the run
+loop, which is exactly what happened when variables were added. The dispatch is
+the same either way, a `match` that compiles to a jump table. If the space ever
+matters it is a contained change: encode to bytes at the end of compilation.
+
+### Lines sit beside the code, not in it
+
+Every instruction has a span in a parallel array. The run loop never touches it
+until something goes wrong, and then the index of the failing instruction gives
+its line. That is how `1 + "a"` on line 2 reports line 2 without the fast path
+paying for it.
+
+### Locals are the stack
+
+A global is found by name in a hash map every time it is used. A local is not
+looked up at all: the compiler knows that the third local declared is the third
+value on the stack, so `GETLOCAL 2` is all the instruction says. Declaring a
+local emits nothing, because the value its initialiser just computed is already
+sitting in the right slot. Leaving a block pops one value per local, and that is
+the local ending. The compiler keeps the list of names only while it compiles;
+at run time names no longer exist.
+
+Resolving from the end of that list is what makes an inner `x` hide an outer
+one. Searching from the front instead finds the outermost `x`, and only the
+shadowing test notices.
+
+### A jump is an address that is filled in later
+
+`if` compiles to: the condition, a jump past the `then` block if false, the
+block, a jump past the `else` block, the `else` block. When the first jump is
+emitted, the compiler does not know how long the `then` block will be, so it
+writes a placeholder and comes back to patch it once it does. Jumps here name
+the instruction to go to rather than a distance, so the same `Jump` goes
+backwards to the top of a `while` loop.
+
+`and` and `or` are jumps too, which is what makes them short-circuit: `false
+and x` jumps past `x` without evaluating it, and the tests prove it by making
+`x` a name that does not exist.
+
+### The bug output cannot see
+
+The conditional jump leaves the condition on the stack, and each path pops it.
+Deleting the pop on the `else` path makes every test that checks output still
+pass: the program prints the right things, it just leaves one stray value
+behind on every pass through the `else`. In a loop that is a stack growing by
+one per iteration. The only test that caught it was one that runs a thousand
+iterations of mixed branches and then asserts the stack is empty. A leak does
+not change behaviour until it does, so the stack depth is checked directly.

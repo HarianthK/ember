@@ -26,8 +26,10 @@ person.name = "Ada";
 - [x] **Phase 1, the front end.** Lexer with line and column on every token,
       parser by precedence climbing, an AST, and a printer that turns the tree
       back into source.
-- [ ] **Phase 2, the compiler and VM.** Bytecode, a stack machine, constants,
-      locals, jumps, calls.
+- [ ] **Phase 2, the compiler and VM.** Done so far: bytecode with a line for
+      every instruction, a stack machine, constants, globals, locals as stack
+      slots, `if`, `while`, and short-circuit `and`/`or`. FizzBuzz runs. Still
+      to come: calls.
 - [ ] **Phase 3, closures and objects.** Upvalues, captured environments,
       lists and maps as heap values.
 - [ ] **Phase 4, the garbage collector.** Mark and sweep over an arena the VM
@@ -37,13 +39,19 @@ person.name = "Ada";
 
 ## Running it
 
-    cargo run -- examples/tour.em     # prints how the parser understood the file
+    cargo run -- examples/fizzbuzz.em           # runs it
+    cargo run -- examples/fizzbuzz.em --dis     # shows the bytecode
+    cargo run -- examples/tour.em --parse       # shows how the parser read it
     cargo test
 
-Until the compiler lands, running a file prints the parse back as source, with
-brackets around every binary expression so the grouping is visible:
+The disassembly is a listing with the source line beside each instruction:
 
-    return (fib((n - 1)) + fib((n - 2)));
+    0000    2 CONSTANT        0 (1)
+    0001    | CONSTANT        1 (2)
+    0002    | CONSTANT        2 (3)
+    0003    | MUL
+    0004    | ADD
+    0005    | PRINT
 
 ## The language
 
