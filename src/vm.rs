@@ -1,7 +1,18 @@
-use crate::chunk::{Chunk, Op, Value};
+use crate::chunk::{Chunk, Function, Op, Value};
 use crate::lexer::Span;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
+
+// Deep enough for any honest recursion, shallow enough to stop a runaway one quickly.
+const MAX_FRAMES: usize = 10_000;
+
+// A function call in progress. `base` is where its slot 0 sits on the shared stack.
+struct Frame {
+    function: Rc<Function>,
+    ip: usize,
+    base: usize,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeError {
@@ -17,6 +28,7 @@ impl fmt::Display for RuntimeError {
 
 pub struct Vm {
     stack: Vec<Value>,
+    frames: Vec<Frame>,
     globals: HashMap<String, Value>,
     // What print writes, so tests can read a program's output without capturing stdout.
     pub output: Vec<String>,
@@ -33,6 +45,7 @@ impl Vm {
     pub fn new() -> Self {
         Vm {
             stack: Vec::with_capacity(256),
+            frames: Vec::new(),
             globals: HashMap::new(),
             output: Vec::new(),
             echo: false,
@@ -67,9 +80,19 @@ impl Vm {
         }
     }
 
-    pub fn run(&mut self, chunk: &Chunk) -> Result<Option<Value>, RuntimeError> {
+    pub fn run(&mut self, script: Rc<Function>) -> Result<Value, RuntimeError> {
+        self.stack.push(Value::Function(Rc::clone(&script)));
+        self.frames.push(Frame {
+            function: Rc::clone(&script),
+            ip: 0,
+            base: 0,
+        });
+        // The running frame's state is kept in locals and written back only on a call.
+        let mut func = script;
         let mut ip = 0;
-        while ip < chunk.code.len() {
+        let mut base = 0;
+        loop {
+            let chunk = &func.chunk;
             let op = chunk.code[ip];
             let at = chunk.span(ip);
             ip += 1;
@@ -176,7 +199,60 @@ impl Vm {
                     }
                     self.output.push(v.to_string());
                 }
-                Op::Return => return Ok(self.stack.pop()),
+                Op::Return => {
+                    let result = self.pop();
+                    let finished = self.frames.pop().expect("a frame to return from");
+                    // The callee, its arguments and its locals all go at once.
+                    self.stack.truncate(finished.base);
+                    let Some(caller) = self.frames.last() else {
+                        return Ok(result);
+                    };
+                    func = Rc::clone(&caller.function);
+                    ip = caller.ip;
+                    base = caller.base;
+                    self.stack.push(result);
+                }
+                Op::Call(argc) => {
+                    let callee_at = self.stack.len() - 1 - argc as usize;
+                    let callee = match &self.stack[callee_at] {
+                        Value::Function(f) => Rc::clone(f),
+                        other => {
+                            return Err(RuntimeError {
+                                message: format!("a {} cannot be called", other.type_name()),
+                                at,
+                            });
+                        }
+                    };
+                    if callee.arity != argc {
+                        return Err(RuntimeError {
+                            message: format!(
+                                "{} takes {} argument{}, but was given {argc}",
+                                callee.name,
+                                callee.arity,
+                                if callee.arity == 1 { "" } else { "s" }
+                            ),
+                            at,
+                        });
+                    }
+                    if self.frames.len() >= MAX_FRAMES {
+                        return Err(RuntimeError {
+                            message: format!(
+                                "stack overflow: more than {MAX_FRAMES} calls deep, in {}",
+                                callee.name
+                            ),
+                            at,
+                        });
+                    }
+                    self.frames.last_mut().expect("a caller").ip = ip;
+                    self.frames.push(Frame {
+                        function: Rc::clone(&callee),
+                        ip: 0,
+                        base: callee_at,
+                    });
+                    func = callee;
+                    ip = 0;
+                    base = callee_at;
+                }
                 Op::DefineGlobal(k) => {
                     let name = name_of(chunk, k);
                     let value = self.pop();
@@ -216,18 +292,17 @@ impl Vm {
                         ip = to as usize;
                     }
                 }
-                Op::GetLocal(slot) => self.stack.push(self.stack[slot as usize].clone()),
+                Op::GetLocal(slot) => self.stack.push(self.stack[base + slot as usize].clone()),
                 Op::SetLocal(slot) => {
                     let value = self
                         .stack
                         .last()
                         .expect("assignment leaves its value")
                         .clone();
-                    self.stack[slot as usize] = value;
+                    self.stack[base + slot as usize] = value;
                 }
             }
         }
-        Ok(None)
     }
 }
 

@@ -1,12 +1,36 @@
 use crate::lexer::Span;
 use std::fmt;
+use std::rc::Rc;
 
-#[derive(Debug, Clone, PartialEq)]
+// Rc for now; phase 4 replaces it with handles into a heap the collector owns.
+#[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
     Str(String),
     Bool(bool),
     Nil,
+    Function(Rc<Function>),
+}
+
+#[derive(Debug)]
+pub struct Function {
+    pub name: String,
+    pub arity: u8,
+    pub chunk: Chunk,
+}
+
+// Two functions are equal only if they are the same function, never by comparing code.
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Nil, Value::Nil) => true,
+            (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl Value {
@@ -21,6 +45,7 @@ impl Value {
             Value::Str(_) => "string",
             Value::Bool(_) => "boolean",
             Value::Nil => "nil",
+            Value::Function(_) => "function",
         }
     }
 }
@@ -32,6 +57,7 @@ impl fmt::Display for Value {
             Value::Str(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Nil => write!(f, "nil"),
+            Value::Function(func) => write!(f, "<fn {}>", func.name),
         }
     }
 }
@@ -66,6 +92,8 @@ pub enum Op {
     // Locals live on the stack; the operand is the slot, so no name is looked up at run time.
     GetLocal(u16),
     SetLocal(u16),
+    // The operand is the argument count; the function sits on the stack just below the arguments.
+    Call(u8),
     // Jumps name the instruction to go to, not a distance, so one op serves both directions.
     Jump(u16),
     // Leaves the condition on the stack; the code on each side pops it.
@@ -126,6 +154,7 @@ impl Chunk {
                     let name = name[..name.find('(').unwrap()].to_uppercase();
                     format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
                 }
+                Op::Call(argc) => format!("{:<12} {argc:>4}", "CALL"),
                 Op::Jump(to) | Op::JumpIfFalse(to) => {
                     let name = format!("{op:?}");
                     let name = name[..name.find('(').unwrap()].to_uppercase();
@@ -145,6 +174,16 @@ impl Chunk {
                 other => format!("{other:?}").to_uppercase(),
             };
             out.push_str(&format!("{i:04} {line_text} {text}\n"));
+        }
+        // A function's body is its own chunk, stored as a constant; list each one after.
+        for value in &self.constants {
+            if let Value::Function(func) = value {
+                out.push_str(&format!(
+                    "\n== {} ==\n{}",
+                    func.name,
+                    func.chunk.disassemble()
+                ));
+            }
         }
         out
     }

@@ -20,8 +20,8 @@ impl fmt::Display for Error {
 /// Parses, compiles and runs a program, returning what it printed.
 pub fn run(src: &str) -> Result<Vec<String>, Error> {
     let program = parser::parse(src).map_err(|e| Error(e.to_string()))?;
-    let chunk = compiler::compile(&program).map_err(|e| Error(e.to_string()))?;
+    let script = compiler::compile(&program).map_err(|e| Error(e.to_string()))?;
     let mut vm = vm::Vm::new();
-    vm.run(&chunk).map_err(|e| Error(e.to_string()))?;
+    vm.run(script).map_err(|e| Error(e.to_string()))?;
     Ok(vm.output)
 }

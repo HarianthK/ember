@@ -78,8 +78,9 @@ fn unfinished_parts_say_so_rather_than_misbehave() {
 
 #[test]
 fn bytecode_is_what_you_would_write_by_hand() {
-    let chunk = compile(&parse("print(1 + 2 * 3)").unwrap()).unwrap();
-    let ops: Vec<String> = chunk
+    let script = compile(&parse("print(1 + 2 * 3)").unwrap()).unwrap();
+    let ops: Vec<String> = script
+        .chunk
         .disassemble()
         .lines()
         .map(|l| l.split_whitespace().nth(2).unwrap().to_string())
@@ -87,7 +88,7 @@ fn bytecode_is_what_you_would_write_by_hand() {
     assert_eq!(
         ops,
         [
-            "CONSTANT", "CONSTANT", "CONSTANT", "MUL", "ADD", "PRINT", "RETURN"
+            "CONSTANT", "CONSTANT", "CONSTANT", "MUL", "ADD", "PRINT", "NIL", "RETURN"
         ]
     );
 }
@@ -198,7 +199,7 @@ print(x)"),
 
 #[test]
 fn locals_are_stack_slots_not_names() {
-    let chunk = compile(
+    let script = compile(
         &parse(
             "{ let a = 1
 let b = 2
@@ -207,8 +208,9 @@ print(b) }",
         .unwrap(),
     )
     .unwrap();
-    let text = chunk.disassemble();
-    assert!(text.contains("GETLOCAL        1"), "{text}");
+    let text = script.chunk.disassemble();
+    // Slot 0 holds the running function, so the two locals are slots 1 and 2.
+    assert!(text.contains("GETLOCAL        2"), "{text}");
     // Two locals, two pops when the block ends, and no global lookups at all.
     assert_eq!(text.matches("POP").count(), 2, "{text}");
     assert!(!text.contains("GLOBAL"), "{text}");
@@ -287,9 +289,9 @@ while i < 1000 {
   let z = nil or i
   i = i + 1
 }";
-    let chunk = compile(&parse(src).unwrap()).unwrap();
+    let script = compile(&parse(src).unwrap()).unwrap();
     let mut vm = Vm::new();
-    vm.run(&chunk).unwrap();
+    vm.run(script).unwrap();
     assert_eq!(
         vm.stack_depth(),
         0,

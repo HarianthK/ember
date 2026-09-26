@@ -29,17 +29,17 @@ fn main() -> ExitCode {
         println!("{}", print_stmts(&program, 0));
         return ExitCode::SUCCESS;
     }
-    let chunk = match compile(&program) {
+    let script = match compile(&program) {
         Ok(c) => c,
         Err(e) => return fail(&e),
     };
     if args.iter().any(|a| a == "--dis") {
-        print!("{}", chunk.disassemble());
+        print!("{}", script.chunk.disassemble());
         return ExitCode::SUCCESS;
     }
     let mut vm = Vm::new();
     vm.echo = true;
-    match vm.run(&chunk) {
+    match vm.run(script) {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => fail(&e),
     }

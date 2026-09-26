@@ -1,7 +1,8 @@
 use crate::ast::{BinOp, Expr, Stmt, UnOp};
-use crate::chunk::{Chunk, Op, Value};
+use crate::chunk::{Chunk, Function, Op, Value};
 use crate::lexer::Span;
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompileError {
@@ -20,6 +21,7 @@ struct Local {
     depth: usize,
 }
 
+// One of these per function being compiled; a nested function gets a fresh one.
 pub struct Compiler {
     chunk: Chunk,
     // The span of the statement being compiled, for expressions that carry none of their own.
@@ -27,15 +29,25 @@ pub struct Compiler {
     // Locals in declaration order; a local's index here is its stack slot at run time.
     locals: Vec<Local>,
     depth: usize,
+    is_script: bool,
+    // Locals of the functions around this one, which it cannot reach until closures exist.
+    enclosing: Vec<String>,
 }
 
 impl Compiler {
-    fn new() -> Self {
+    fn new(own_name: &str, is_script: bool, enclosing: Vec<String>, at: Span) -> Self {
         Compiler {
             chunk: Chunk::new(),
-            at: Span { line: 1, col: 1 },
-            locals: Vec::new(),
+            at,
+            // Slot 0 holds the function being run. Naming it after the function is what
+            // lets a function call itself before closures can capture anything.
+            locals: vec![Local {
+                name: own_name.to_string(),
+                depth: 0,
+            }],
             depth: 0,
+            is_script,
+            enclosing,
         }
     }
 
@@ -54,6 +66,19 @@ impl Compiler {
             .iter()
             .rposition(|l| l.name == name)
             .map(|i| i as u16)
+    }
+
+    fn check_reachable(&self, name: &str) -> Result<(), CompileError> {
+        // Without this, the name would quietly fall through to a global of the same name.
+        if self.enclosing.iter().any(|n| n == name) {
+            return Err(CompileError {
+                message: format!(
+                    "{name} belongs to an enclosing function; capturing it needs closures, which come in phase 3"
+                ),
+                at: self.at,
+            });
+        }
+        Ok(())
     }
 
     fn block(&mut self, body: &[Stmt]) -> Result<(), CompileError> {
@@ -147,9 +172,20 @@ impl Compiler {
                     });
                 }
             }
-            Stmt::Return { at, .. } => {
+            Stmt::Return { value, at } => {
                 self.at = *at;
-                return Err(self.not_yet("return"));
+                if self.is_script {
+                    return Err(CompileError {
+                        message: "return is only allowed inside a function".into(),
+                        at: *at,
+                    });
+                }
+                match value {
+                    Some(v) => self.expr(v)?,
+                    None => self.emit(Op::Nil),
+                }
+                self.at = *at;
+                self.emit(Op::Return);
             }
             Stmt::For { at, .. } => {
                 self.at = *at;
@@ -182,6 +218,62 @@ impl Compiler {
             }
             Stmt::Block(body) => self.block(body)?,
         }
+        Ok(())
+    }
+
+    fn function(
+        &mut self,
+        name: &Option<String>,
+        params: &[String],
+        body: &[Stmt],
+    ) -> Result<(), CompileError> {
+        let at = self.at;
+        let own_name = name.clone().unwrap_or_default();
+        let arity = u8::try_from(params.len()).map_err(|_| CompileError {
+            message: format!(
+                "a function can take at most 255 parameters, not {}",
+                params.len()
+            ),
+            at,
+        })?;
+        // Every declared local here is out of reach for the function inside it. Slot 0 is left
+        // out: a named function is usually a global too, and inner code may call it by that name.
+        let mut enclosing = self.enclosing.clone();
+        enclosing.extend(self.locals.iter().skip(1).map(|l| l.name.clone()));
+        let mut inner = Compiler::new(&own_name, false, enclosing, at);
+        // Parameters are the first locals, in the slots the caller's arguments already occupy.
+        inner.depth = 1;
+        for param in params {
+            if inner.locals.iter().skip(1).any(|l| &l.name == param) {
+                return Err(CompileError {
+                    message: format!("the parameter {param} is repeated"),
+                    at,
+                });
+            }
+            inner.locals.push(Local {
+                name: param.clone(),
+                depth: 1,
+            });
+        }
+        // The body runs at the parameters' depth, so `let a` in it cannot silently hide parameter a.
+        for stmt in body {
+            inner.stmt(stmt)?;
+        }
+        // Falling off the end returns nil. The frame's locals go with the frame, so nothing is popped.
+        inner.emit(Op::Nil);
+        inner.emit(Op::Return);
+        let func = Function {
+            name: if own_name.is_empty() {
+                "anonymous".into()
+            } else {
+                own_name
+            },
+            arity,
+            chunk: inner.chunk,
+        };
+        let k = self.chunk.constant(Value::Function(Rc::new(func)));
+        self.at = at;
+        self.emit(Op::Constant(k));
         Ok(())
     }
 
@@ -245,6 +337,7 @@ impl Compiler {
             Expr::Name(name) => match self.resolve(name) {
                 Some(slot) => self.emit(Op::GetLocal(slot)),
                 None => {
+                    self.check_reachable(name)?;
                     let k = self.name_constant(name);
                     self.emit(Op::GetGlobal(k));
                 }
@@ -259,18 +352,29 @@ impl Compiler {
                 match self.resolve(name) {
                     Some(slot) => self.emit(Op::SetLocal(slot)),
                     None => {
+                        self.check_reachable(name)?;
                         let k = self.name_constant(name);
                         self.emit(Op::SetGlobal(k));
                     }
                 }
             }
-            Expr::Call { at, .. }
-            | Expr::Index { at, .. }
-            | Expr::Field { at, .. }
-            | Expr::Assign { at, .. } => {
+            Expr::Call { callee, args, at } => {
+                // The function first, then its arguments above it, which become its first locals.
+                self.expr(callee)?;
+                for arg in args {
+                    self.expr(arg)?;
+                }
+                self.at = *at;
+                let argc = u8::try_from(args.len()).map_err(|_| CompileError {
+                    message: format!("a call can pass at most 255 arguments, not {}", args.len()),
+                    at: *at,
+                })?;
+                self.emit(Op::Call(argc));
+            }
+            Expr::Func { name, params, body } => self.function(name, params, body)?,
+            Expr::Index { at, .. } | Expr::Field { at, .. } | Expr::Assign { at, .. } => {
                 self.at = *at;
                 let what = match expr {
-                    Expr::Call { .. } => "a call",
                     Expr::Index { .. } => "indexing",
                     Expr::Field { .. } => "a field",
                     _ => "assignment",
@@ -279,17 +383,22 @@ impl Compiler {
             }
             Expr::List(_) => return Err(self.not_yet("a list")),
             Expr::Map(_) => return Err(self.not_yet("a map")),
-            Expr::Func { .. } => return Err(self.not_yet("a function")),
         }
         Ok(())
     }
 }
 
-pub fn compile(program: &[Stmt]) -> Result<Chunk, CompileError> {
-    let mut c = Compiler::new();
+// The whole program compiles to a function of no arguments, which the VM calls to start.
+pub fn compile(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+    let mut c = Compiler::new("", true, Vec::new(), Span { line: 1, col: 1 });
     for stmt in program {
         c.stmt(stmt)?;
     }
+    c.emit(Op::Nil);
     c.emit(Op::Return);
-    Ok(c.chunk)
+    Ok(Rc::new(Function {
+        name: "script".into(),
+        arity: 0,
+        chunk: c.chunk,
+    }))
 }
