@@ -1,6 +1,7 @@
 use ember::compiler::compile;
 use ember::parser::parse;
 use ember::run;
+use ember::vm::Vm;
 
 fn out(src: &str) -> Vec<String> {
     run(src).unwrap_or_else(|e| panic!("{src}: {e}"))
@@ -70,7 +71,7 @@ fn runtime_errors_say_what_and_where() {
 
 #[test]
 fn unfinished_parts_say_so_rather_than_misbehave() {
-    assert!(err("if true { print(1) }").contains("if is not compiled yet"));
+    assert!(err("for x in y { print(x) }").contains("for is not compiled yet"));
     assert!(err("let xs = [1]").contains("a list is not compiled yet"));
     assert!(err("print(1, 2)").contains("print takes one value"));
 }
@@ -211,4 +212,87 @@ print(b) }",
     // Two locals, two pops when the block ends, and no global lookups at all.
     assert_eq!(text.matches("POP").count(), 2, "{text}");
     assert!(!text.contains("GLOBAL"), "{text}");
+}
+
+#[test]
+fn if_takes_one_branch() {
+    assert_eq!(
+        out("if 1 < 2 { print(\"yes\") } else { print(\"no\") }"),
+        ["yes"]
+    );
+    assert_eq!(
+        out("if 1 > 2 { print(\"yes\") } else { print(\"no\") }"),
+        ["no"]
+    );
+    assert_eq!(
+        out("if false { print(\"never\") }\nprint(\"after\")"),
+        ["after"]
+    );
+    let chain = "let n = 15
+if n % 15 == 0 { print(\"fizzbuzz\") } else if n % 3 == 0 { print(\"fizz\") } else { print(n) }";
+    assert_eq!(out(chain), ["fizzbuzz"]);
+}
+
+#[test]
+fn while_loops_until_false() {
+    let src = "let i = 0
+let total = 0
+while i < 10 {
+  i = i + 1
+  total = total + i
+}
+print(total)";
+    assert_eq!(out(src), ["55"]);
+    assert_eq!(out("while false { print(1) }\nprint(2)"), ["2"]);
+}
+
+#[test]
+fn and_or_short_circuit_and_return_the_deciding_value() {
+    // The right side would fail if it ran, so these prove it did not.
+    assert_eq!(out("print(false and undefined_name)"), ["false"]);
+    assert_eq!(out("print(true or undefined_name)"), ["true"]);
+    assert_eq!(out(r#"print(nil or "default")"#), ["default"]);
+    assert_eq!(out(r#"print("first" or "second")"#), ["first"]);
+    assert_eq!(out("print(1 and 2)"), ["2"]);
+    assert_eq!(out("print(nil and 2)"), ["nil"]);
+    assert_eq!(out("print(1 < 2 and 2 < 3)"), ["true"]);
+}
+
+#[test]
+fn fizzbuzz_runs() {
+    let src = "let i = 1
+while i <= 15 {
+  if i % 15 == 0 { print(\"FizzBuzz\") }
+  else if i % 3 == 0 { print(\"Fizz\") }
+  else if i % 5 == 0 { print(\"Buzz\") }
+  else { print(i) }
+  i = i + 1
+}";
+    let got = out(src);
+    assert_eq!(got.len(), 15);
+    assert_eq!(got[2], "Fizz");
+    assert_eq!(got[4], "Buzz");
+    assert_eq!(got[14], "FizzBuzz");
+    assert_eq!(got[6], "7");
+}
+
+// Every branch and loop pops its condition and its locals; if one side forgot,
+// a long loop would leave the stack a little deeper on every pass.
+#[test]
+fn nothing_leaks_onto_the_stack() {
+    let src = "let i = 0
+while i < 1000 {
+  let doubled = i * 2
+  if doubled > 10 and i % 2 == 0 { let x = 1 } else { let y = 2 }
+  let z = nil or i
+  i = i + 1
+}";
+    let chunk = compile(&parse(src).unwrap()).unwrap();
+    let mut vm = Vm::new();
+    vm.run(&chunk).unwrap();
+    assert_eq!(
+        vm.stack_depth(),
+        0,
+        "the stack should be empty after the program"
+    );
 }

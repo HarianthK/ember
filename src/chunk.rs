@@ -66,6 +66,10 @@ pub enum Op {
     // Locals live on the stack; the operand is the slot, so no name is looked up at run time.
     GetLocal(u16),
     SetLocal(u16),
+    // Jumps name the instruction to go to, not a distance, so one op serves both directions.
+    Jump(u16),
+    // Leaves the condition on the stack; the code on each side pops it.
+    JumpIfFalse(u16),
 }
 
 // Bytecode plus the line each instruction came from, kept beside it rather than
@@ -121,6 +125,11 @@ impl Chunk {
                     let name = format!("{op:?}");
                     let name = name[..name.find('(').unwrap()].to_uppercase();
                     format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
+                }
+                Op::Jump(to) | Op::JumpIfFalse(to) => {
+                    let name = format!("{op:?}");
+                    let name = name[..name.find('(').unwrap()].to_uppercase();
+                    format!("{name:<12} -> {to:04}")
                 }
                 Op::GetLocal(slot) | Op::SetLocal(slot) => {
                     let name = format!("{op:?}");

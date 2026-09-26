@@ -39,6 +39,11 @@ impl Vm {
         }
     }
 
+    // For tests: after a whole program the stack must be empty, or something leaked.
+    pub fn stack_depth(&self) -> usize {
+        self.stack.len()
+    }
+
     fn pop(&mut self) -> Value {
         // The compiler balances every push with a pop, so an empty stack here is a compiler bug.
         self.stack
@@ -204,6 +209,12 @@ impl Vm {
                         .expect("assignment leaves its value")
                         .clone();
                     self.globals.insert(name, value);
+                }
+                Op::Jump(to) => ip = to as usize,
+                Op::JumpIfFalse(to) => {
+                    if !self.stack.last().expect("a condition to test").truthy() {
+                        ip = to as usize;
+                    }
                 }
                 Op::GetLocal(slot) => self.stack.push(self.stack[slot as usize].clone()),
                 Op::SetLocal(slot) => {

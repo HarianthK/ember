@@ -70,6 +70,30 @@ impl Compiler {
         Ok(())
     }
 
+    // Emits a jump whose target is not known yet; patch() fills it in once it is.
+    fn jump(&mut self, make: fn(u16) -> Op) -> usize {
+        self.emit(make(u16::MAX));
+        self.chunk.code.len() - 1
+    }
+
+    fn here(&self) -> Result<u16, CompileError> {
+        u16::try_from(self.chunk.code.len()).map_err(|_| CompileError {
+            message: "this program is too long to jump across; the limit is 65535 instructions"
+                .into(),
+            at: self.at,
+        })
+    }
+
+    fn patch(&mut self, at: usize) -> Result<(), CompileError> {
+        let to = self.here()?;
+        self.chunk.code[at] = match self.chunk.code[at] {
+            Op::Jump(_) => Op::Jump(to),
+            Op::JumpIfFalse(_) => Op::JumpIfFalse(to),
+            other => unreachable!("patched a {other:?}, which is not a jump"),
+        };
+        Ok(())
+    }
+
     fn not_yet(&self, what: &str) -> CompileError {
         CompileError {
             message: format!("{what} is not compiled yet"),
@@ -131,8 +155,31 @@ impl Compiler {
                 self.at = *at;
                 return Err(self.not_yet("for"));
             }
-            Stmt::If { .. } => return Err(self.not_yet("if")),
-            Stmt::While { .. } => return Err(self.not_yet("while")),
+            Stmt::If {
+                cond,
+                then,
+                otherwise,
+            } => {
+                self.expr(cond)?;
+                let to_else = self.jump(Op::JumpIfFalse);
+                self.emit(Op::Pop);
+                self.block(then)?;
+                let to_end = self.jump(Op::Jump);
+                self.patch(to_else)?;
+                self.emit(Op::Pop);
+                self.block(otherwise)?;
+                self.patch(to_end)?;
+            }
+            Stmt::While { cond, body } => {
+                let start = self.here()?;
+                self.expr(cond)?;
+                let to_exit = self.jump(Op::JumpIfFalse);
+                self.emit(Op::Pop);
+                self.block(body)?;
+                self.emit(Op::Jump(start));
+                self.patch(to_exit)?;
+                self.emit(Op::Pop);
+            }
             Stmt::Block(body) => self.block(body)?,
         }
         Ok(())
@@ -158,7 +205,24 @@ impl Compiler {
                     UnOp::Not => Op::Not,
                 });
             }
-            Expr::Binary(BinOp::And | BinOp::Or, ..) => return Err(self.not_yet("and/or")),
+            // The right side only runs when the left does not decide it, and the result is
+            // whichever operand decided, so `name or "default"` works as it does in Python.
+            Expr::Binary(BinOp::And, left, right) => {
+                self.expr(left)?;
+                let to_end = self.jump(Op::JumpIfFalse);
+                self.emit(Op::Pop);
+                self.expr(right)?;
+                self.patch(to_end)?;
+            }
+            Expr::Binary(BinOp::Or, left, right) => {
+                self.expr(left)?;
+                let to_right = self.jump(Op::JumpIfFalse);
+                let to_end = self.jump(Op::Jump);
+                self.patch(to_right)?;
+                self.emit(Op::Pop);
+                self.expr(right)?;
+                self.patch(to_end)?;
+            }
             Expr::Binary(op, left, right) => {
                 // Operands in source order, so the stack holds left then right when the op runs.
                 self.expr(left)?;
