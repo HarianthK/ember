@@ -56,13 +56,13 @@ a function literal nested inside another lines its body up properly. It did not
 at first, and nothing caught it: the round trip still passed, because the output
 reparsed to the same thing. Only reading the printed sample showed it.
 
-## Spans on everything from the start
+## Spans on everything that can fail
 
-Every token carries a line and column, and the nodes that can fail at runtime
-carry one too. Adding that later means threading a parameter through every
-function in the compiler, so it is cheaper to pay for it now, even though phase
-1 only uses it for parse errors. The runtime will need it to say which line
-threw.
+Every token carries a line and column, and so does every node that can fail at
+run time. This section first claimed that was true from the start. It was not:
+names and operators had no position of their own, and it took until phase 2 to
+notice, because a stopgap was hiding it. See "The error that pointed at the
+wrong line" below. Literals still carry none, since a constant cannot fail.
 
 ## The `{` problem
 
@@ -128,3 +128,65 @@ behind on every pass through the `else`. In a loop that is a stack growing by
 one per iteration. The only test that caught it was one that runs a thousand
 iterations of mixed branches and then asserts the stack is empty. A leak does
 not change behaviour until it does, so the stack depth is checked directly.
+
+## Phase 2: calls
+
+### One stack, many frames
+
+Every call gets a frame: the function, where it is in that function's code,
+and a base, the point on the value stack where its slot 0 sits. There is still
+only one stack. The caller pushes the function and then the arguments, and the
+new frame's base is simply where the function was, so the arguments are already
+sitting in slots 1, 2, 3: the parameters. Nothing is copied. Returning truncates
+the stack back to the base, which removes the function, its arguments and all
+of its locals in one step, and pushes the result in their place.
+
+The current frame's position is kept in plain local variables inside the run
+loop, not in the frame, and written back only when another call happens. Every
+instruction reads it, so it is worth not going through a vector for it.
+
+### Slot 0 is the function itself
+
+The function being called sits in slot 0 of its own frame, which is the usual
+design. Naming that slot after the function, rather than leaving it blank,
+buys recursion for free: `fact` calling `fact` resolves to slot 0 even when
+`fact` is a local and closures do not exist yet. The one test that uses a local
+recursive function fails the moment the slot is left unnamed.
+
+### Reaching an outer local is refused, not guessed
+
+A function inside another function cannot see the outer one's locals until
+closures arrive in phase 3. The obvious implementation would treat such a name
+as a global, and if a global of the same name happened to exist, would read it
+and return the wrong value with no error at all. So each compiler is told the
+names of every local around it, and using one is a compile error that says why.
+The only exception is the enclosing function's own name, since a named function
+is usually a global too and nested code may call it.
+
+### Natives need no frame
+
+`print` and `clock` are written in Rust. A native runs to completion the moment
+it is called, so it gets no frame: its arguments are split off the stack,
+handed over, and replaced by its result. `print` was a special instruction until
+this existed, and removing that special case is what exposed the bug below.
+
+### The error that pointed at the wrong line
+
+Before this phase, `1 + "a"` on line 2 reported line 1. Binary operators and
+names had no position in the syntax tree, so the instruction took whichever
+position the compiler had last been given, and that could be the statement
+before. The stopgap `print` instruction set its own position before compiling
+its argument, which happened to hide the problem in every test, because every
+test printed. Making `print` an ordinary call removed that, and the test for
+error positions failed at once. Names, unary and binary operators now carry the
+position of their token, and the error points at the exact operator:
+`at line 2, column 3`.
+
+### Traces
+
+A runtime error now lists every call it happened inside, innermost first, each
+at the line of the call it is waiting on. The run loop raises a plain fault;
+the outer `run` builds the trace from the frames still on the stack, then
+empties the machine so it can run the next program. Runaway recursion is ten
+thousand identical frames, so the display collapses repeats into one line, as
+Python does.

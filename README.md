@@ -26,10 +26,10 @@ person.name = "Ada";
 - [x] **Phase 1, the front end.** Lexer with line and column on every token,
       parser by precedence climbing, an AST, and a printer that turns the tree
       back into source.
-- [ ] **Phase 2, the compiler and VM.** Done so far: bytecode with a line for
-      every instruction, a stack machine, constants, globals, locals as stack
-      slots, `if`, `while`, and short-circuit `and`/`or`. FizzBuzz runs. Still
-      to come: calls.
+- [x] **Phase 2, the compiler and VM.** Bytecode with a line for every
+      instruction, a stack machine, globals, locals as stack slots, `if`,
+      `while`, short-circuit `and`/`or`, functions with a frame per call,
+      recursion, natives written in Rust, and errors that show the call stack.
 - [ ] **Phase 3, closures and objects.** Upvalues, captured environments,
       lists and maps as heap values.
 - [ ] **Phase 4, the garbage collector.** Mark and sweep over an arena the VM
