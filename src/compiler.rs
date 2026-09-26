@@ -128,19 +128,6 @@ impl Compiler {
 
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
-            // print is a call to a function that does not exist yet, so it is spelled as an instruction until then.
-            Stmt::Expr(Expr::Call { callee, args, at }) if matches!(callee.as_ref(), Expr::Name(n, _) if n == "print") =>
-            {
-                self.at = *at;
-                if args.len() != 1 {
-                    return Err(CompileError {
-                        message: format!("print takes one value, not {}", args.len()),
-                        at: *at,
-                    });
-                }
-                self.expr(&args[0])?;
-                self.emit(Op::Print);
-            }
             Stmt::Expr(e) => {
                 self.expr(e)?;
                 // An expression statement leaves its value on the stack; nothing wants it.

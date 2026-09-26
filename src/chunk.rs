@@ -1,4 +1,5 @@
 use crate::lexer::Span;
+use crate::vm::Vm;
 use std::fmt;
 use std::rc::Rc;
 
@@ -10,6 +11,20 @@ pub enum Value {
     Bool(bool),
     Nil,
     Function(Rc<Function>),
+    Native(Rc<Native>),
+}
+
+// A function written in Rust. `arity` of None takes any number of arguments.
+pub struct Native {
+    pub name: &'static str,
+    pub arity: Option<u8>,
+    pub call: fn(&mut Vm, &[Value]) -> Result<Value, String>,
+}
+
+impl fmt::Debug for Native {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<native {}>", self.name)
+    }
 }
 
 #[derive(Debug)]
@@ -28,6 +43,7 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -45,7 +61,7 @@ impl Value {
             Value::Str(_) => "string",
             Value::Bool(_) => "boolean",
             Value::Nil => "nil",
-            Value::Function(_) => "function",
+            Value::Function(_) | Value::Native(_) => "function",
         }
     }
 }
@@ -58,6 +74,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Nil => write!(f, "nil"),
             Value::Function(func) => write!(f, "<fn {}>", func.name),
+            Value::Native(native) => write!(f, "<native {}>", native.name),
         }
     }
 }
@@ -83,7 +100,6 @@ pub enum Op {
     Greater,
     GreaterEq,
     Pop,
-    Print,
     Return,
     // Globals are looked up by name, the operand being the name's constant.
     DefineGlobal(u16),

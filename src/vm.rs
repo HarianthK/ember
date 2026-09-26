@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk, Function, Op, Value};
+use crate::chunk::{Chunk, Function, Native, Op, Value};
 use crate::lexer::Span;
 use std::collections::HashMap;
 use std::fmt;
@@ -43,13 +43,18 @@ impl Default for Vm {
 
 impl Vm {
     pub fn new() -> Self {
-        Vm {
+        let mut vm = Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::new(),
             globals: HashMap::new(),
             output: Vec::new(),
             echo: false,
+        };
+        for native in NATIVES {
+            vm.globals
+                .insert(native.name.to_string(), Value::Native(Rc::new(native)));
         }
+        vm
     }
 
     // For tests: after a whole program the stack must be empty, or something leaked.
@@ -192,13 +197,6 @@ impl Vm {
                 Op::Pop => {
                     self.pop();
                 }
-                Op::Print => {
-                    let v = self.pop();
-                    if self.echo {
-                        println!("{v}");
-                    }
-                    self.output.push(v.to_string());
-                }
                 Op::Return => {
                     let result = self.pop();
                     let finished = self.frames.pop().expect("a frame to return from");
@@ -216,6 +214,26 @@ impl Vm {
                     let callee_at = self.stack.len() - 1 - argc as usize;
                     let callee = match &self.stack[callee_at] {
                         Value::Function(f) => Rc::clone(f),
+                        Value::Native(native) => {
+                            let native = Rc::clone(native);
+                            if native.arity.is_some_and(|n| n != argc) {
+                                return Err(RuntimeError {
+                                    message: format!(
+                                        "{} takes {} arguments, but was given {argc}",
+                                        native.name,
+                                        native.arity.unwrap_or(0)
+                                    ),
+                                    at,
+                                });
+                            }
+                            // A native needs no frame: it runs to completion right here.
+                            let args = self.stack.split_off(callee_at + 1);
+                            self.stack.pop();
+                            let result = (native.call)(self, &args)
+                                .map_err(|message| RuntimeError { message, at })?;
+                            self.stack.push(result);
+                            continue;
+                        }
                         other => {
                             return Err(RuntimeError {
                                 message: format!("a {} cannot be called", other.type_name()),
@@ -311,4 +329,41 @@ fn name_of(chunk: &Chunk, k: u16) -> String {
         Value::Str(s) => s.clone(),
         other => unreachable!("a global's name constant is a string, not {other}"),
     }
+}
+
+const NATIVES: [Native; 2] = [
+    Native {
+        name: "print",
+        arity: None,
+        call: native_print,
+    },
+    Native {
+        name: "clock",
+        arity: Some(0),
+        call: native_clock,
+    },
+];
+
+// Prints its arguments separated by spaces, as Python does.
+fn native_print(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let line = args
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if vm.echo {
+        println!("{line}");
+    }
+    vm.output.push(line);
+    Ok(Value::Nil)
+}
+
+// Seconds since the program's first call to it, for timing code from inside the language.
+fn native_clock(_vm: &mut Vm, _args: &[Value]) -> Result<Value, String> {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    Ok(Value::Number(
+        START.get_or_init(Instant::now).elapsed().as_secs_f64(),
+    ))
 }

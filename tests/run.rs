@@ -73,12 +73,11 @@ fn runtime_errors_say_what_and_where() {
 fn unfinished_parts_say_so_rather_than_misbehave() {
     assert!(err("for x in y { print(x) }").contains("for is not compiled yet"));
     assert!(err("let xs = [1]").contains("a list is not compiled yet"));
-    assert!(err("print(1, 2)").contains("print takes one value"));
 }
 
 #[test]
 fn bytecode_is_what_you_would_write_by_hand() {
-    let script = compile(&parse("print(1 + 2 * 3)").unwrap()).unwrap();
+    let script = compile(&parse("1 + 2 * 3").unwrap()).unwrap();
     let ops: Vec<String> = script
         .chunk
         .disassemble()
@@ -88,7 +87,7 @@ fn bytecode_is_what_you_would_write_by_hand() {
     assert_eq!(
         ops,
         [
-            "CONSTANT", "CONSTANT", "CONSTANT", "MUL", "ADD", "PRINT", "NIL", "RETURN"
+            "CONSTANT", "CONSTANT", "CONSTANT", "MUL", "ADD", "POP", "NIL", "RETURN"
         ]
     );
 }
@@ -203,16 +202,16 @@ fn locals_are_stack_slots_not_names() {
         &parse(
             "{ let a = 1
 let b = 2
-print(b) }",
+let c = b }",
         )
         .unwrap(),
     )
     .unwrap();
     let text = script.chunk.disassemble();
-    // Slot 0 holds the running function, so the two locals are slots 1 and 2.
+    // Slot 0 holds the running function, so the locals are slots 1, 2 and 3.
     assert!(text.contains("GETLOCAL        2"), "{text}");
-    // Two locals, two pops when the block ends, and no global lookups at all.
-    assert_eq!(text.matches("POP").count(), 2, "{text}");
+    // Three locals, three pops when the block ends, and no global lookups at all.
+    assert_eq!(text.matches("POP").count(), 3, "{text}");
     assert!(!text.contains("GLOBAL"), "{text}");
 }
 

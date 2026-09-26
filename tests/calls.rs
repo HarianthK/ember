@@ -163,3 +163,38 @@ while i < 1000 {
     vm.run(script).unwrap();
     assert_eq!(vm.stack_depth(), 0);
 }
+
+#[test]
+fn print_is_an_ordinary_function() {
+    assert_eq!(out("print(1, \"two\", nil)"), ["1 two nil"]);
+    assert_eq!(out("print()"), [""]);
+    assert_eq!(
+        out("let say = print
+say(\"hi\")"),
+        ["hi"]
+    );
+    assert_eq!(out("print(print)"), ["<native print>"]);
+    // It returns nil like any function that returns nothing.
+    assert_eq!(out("print(print(1))"), ["1", "nil"]);
+}
+
+#[test]
+fn natives_check_their_arity() {
+    assert_eq!(out("print(clock() >= 0)"), ["true"]);
+    let e = err("clock(1)");
+    assert!(
+        e.contains("clock takes 0 arguments, but was given 1"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_print_call_compiles_like_any_call() {
+    let script = compile(&parse("print(1)").unwrap()).unwrap();
+    let text = script.chunk.disassemble();
+    assert!(
+        text.contains("GETGLOBAL") && text.contains("(print)"),
+        "{text}"
+    );
+    assert!(text.contains("CALL            1"), "{text}");
+}
