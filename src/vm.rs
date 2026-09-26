@@ -14,15 +14,42 @@ struct Frame {
     base: usize,
 }
 
+// What the run loop raises: what went wrong and where. run() adds the call stack.
+struct Fault {
+    message: String,
+    at: Span,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
     pub at: Span,
+    // Innermost call first: the function's name and the line it had reached.
+    pub trace: Vec<(String, u32)>,
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.message, self.at)
+        write!(f, "{} at {}", self.message, self.at)?;
+        // Runaway recursion is ten thousand identical frames; say so once, as Python does.
+        let mut i = 0;
+        while i < self.trace.len() {
+            let (name, line) = &self.trace[i];
+            let repeats = self.trace[i..]
+                .iter()
+                .take_while(|entry| *entry == &self.trace[i])
+                .count();
+            write!(f, "\n  in {name}, line {line}")?;
+            if repeats > 1 {
+                write!(
+                    f,
+                    "\n  ... the line above repeated {} more times",
+                    repeats - 1
+                )?;
+            }
+            i += repeats;
+        }
+        Ok(())
     }
 }
 
@@ -69,12 +96,12 @@ impl Vm {
             .expect("the compiler emitted a pop with nothing on the stack")
     }
 
-    fn numbers(&mut self, op: &str, at: Span) -> Result<(f64, f64), RuntimeError> {
+    fn numbers(&mut self, op: &str, at: Span) -> Result<(f64, f64), Fault> {
         let b = self.pop();
         let a = self.pop();
         match (&a, &b) {
             (Value::Number(x), Value::Number(y)) => Ok((*x, *y)),
-            _ => Err(RuntimeError {
+            _ => Err(Fault {
                 message: format!(
                     "{op} needs two numbers, not a {} and a {}",
                     a.type_name(),
@@ -86,6 +113,29 @@ impl Vm {
     }
 
     pub fn run(&mut self, script: Rc<Function>) -> Result<Value, RuntimeError> {
+        self.execute(script).map_err(|fault| {
+            // The failing frame is at the fault itself; every frame below it is paused at its call.
+            let mut trace = Vec::new();
+            for (i, frame) in self.frames.iter().enumerate().rev() {
+                let line = if i + 1 == self.frames.len() {
+                    fault.at.line
+                } else {
+                    frame.function.chunk.span(frame.ip - 1).line
+                };
+                trace.push((frame.function.name.clone(), line));
+            }
+            // Leave the machine ready for the next program, which is what a REPL will need.
+            self.stack.clear();
+            self.frames.clear();
+            RuntimeError {
+                message: fault.message,
+                at: fault.at,
+                trace,
+            }
+        })
+    }
+
+    fn execute(&mut self, script: Rc<Function>) -> Result<Value, Fault> {
         self.stack.push(Value::Function(Rc::clone(&script)));
         self.frames.push(Frame {
             function: Rc::clone(&script),
@@ -114,7 +164,7 @@ impl Vm {
                         (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
                         (Value::Str(x), Value::Str(y)) => Value::Str(x + &y),
                         (a, b) => {
-                            return Err(RuntimeError {
+                            return Err(Fault {
                                 message: format!(
                                     "+ needs two numbers or two strings, not a {} and a {}",
                                     a.type_name(),
@@ -138,7 +188,7 @@ impl Vm {
                     let (a, b) = self.numbers("/", at)?;
                     // Dividing by zero is an error rather than infinity, which is what people expect.
                     if b == 0.0 {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: "division by zero".into(),
                             at,
                         });
@@ -148,7 +198,7 @@ impl Vm {
                 Op::Rem => {
                     let (a, b) = self.numbers("%", at)?;
                     if b == 0.0 {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: "remainder by zero".into(),
                             at,
                         });
@@ -158,7 +208,7 @@ impl Vm {
                 Op::Neg => match self.pop() {
                     Value::Number(n) => self.stack.push(Value::Number(-n)),
                     other => {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: format!("- needs a number, not a {}", other.type_name()),
                             at,
                         });
@@ -217,7 +267,7 @@ impl Vm {
                         Value::Native(native) => {
                             let native = Rc::clone(native);
                             if native.arity.is_some_and(|n| n != argc) {
-                                return Err(RuntimeError {
+                                return Err(Fault {
                                     message: format!(
                                         "{} takes {} arguments, but was given {argc}",
                                         native.name,
@@ -230,19 +280,19 @@ impl Vm {
                             let args = self.stack.split_off(callee_at + 1);
                             self.stack.pop();
                             let result = (native.call)(self, &args)
-                                .map_err(|message| RuntimeError { message, at })?;
+                                .map_err(|message| Fault { message, at })?;
                             self.stack.push(result);
                             continue;
                         }
                         other => {
-                            return Err(RuntimeError {
+                            return Err(Fault {
                                 message: format!("a {} cannot be called", other.type_name()),
                                 at,
                             });
                         }
                     };
                     if callee.arity != argc {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: format!(
                                 "{} takes {} argument{}, but was given {argc}",
                                 callee.name,
@@ -253,7 +303,7 @@ impl Vm {
                         });
                     }
                     if self.frames.len() >= MAX_FRAMES {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: format!(
                                 "stack overflow: more than {MAX_FRAMES} calls deep, in {}",
                                 callee.name
@@ -281,7 +331,7 @@ impl Vm {
                     match self.globals.get(&name) {
                         Some(v) => self.stack.push(v.clone()),
                         None => {
-                            return Err(RuntimeError {
+                            return Err(Fault {
                                 message: format!("{name} is not defined"),
                                 at,
                             });
@@ -292,7 +342,7 @@ impl Vm {
                     let name = name_of(chunk, k);
                     // Assigning never creates a variable, so a typo is an error rather than a new global.
                     if !self.globals.contains_key(&name) {
-                        return Err(RuntimeError {
+                        return Err(Fault {
                             message: format!("{name} is not defined; declare it with let first"),
                             at,
                         });

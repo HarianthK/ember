@@ -198,3 +198,56 @@ fn a_print_call_compiles_like_any_call() {
     );
     assert!(text.contains("CALL            1"), "{text}");
 }
+
+#[test]
+fn a_runtime_error_shows_every_call_it_happened_inside() {
+    let src = "fn average(total, count) {
+  return total / count
+}
+fn report(total) {
+  let avg = average(total, 0)
+  return avg
+}
+report(10)";
+    let script = compile(&parse(src).unwrap()).unwrap();
+    let e = Vm::new().run(script).unwrap_err();
+    assert_eq!(e.message, "division by zero");
+    assert_eq!(e.at.line, 2);
+    // Innermost first: where it failed, then each caller at the line of its call.
+    let expected: Vec<(String, u32)> = vec![
+        ("average".into(), 2),
+        ("report".into(), 5),
+        ("script".into(), 8),
+    ];
+    assert_eq!(e.trace, expected);
+    assert!(e.to_string().contains("\n  in report, line 5"), "{e}");
+}
+
+#[test]
+fn a_native_failing_is_traced_from_its_caller() {
+    let e = err("fn tick() {\n  return clock(1)\n}\ntick()");
+    assert!(e.contains("in tick, line 2\n  in script, line 4"), "{e}");
+}
+
+#[test]
+fn deep_recursion_is_summarised_not_listed() {
+    let e = err("fn forever(n) {\n  return forever(n + 1)\n}\nforever(0)");
+    assert!(e.contains("stack overflow"), "{e}");
+    assert!(e.contains("repeated"), "{e}");
+    assert!(
+        e.lines().count() < 10,
+        "the trace should collapse, got {} lines",
+        e.lines().count()
+    );
+}
+
+#[test]
+fn the_machine_is_usable_after_an_error() {
+    let mut vm = Vm::new();
+    let bad = compile(&parse("fn f() { return 1 / 0 }\nf()").unwrap()).unwrap();
+    assert!(vm.run(bad).is_err());
+    let good = compile(&parse("fn g(x) { return x + 1 }\nprint(g(1))").unwrap()).unwrap();
+    vm.run(good).unwrap();
+    assert_eq!(vm.output, ["2"]);
+    assert_eq!(vm.stack_depth(), 0);
+}
