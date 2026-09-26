@@ -1,5 +1,6 @@
 use crate::chunk::{Chunk, Op, Value};
 use crate::lexer::Span;
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +17,7 @@ impl fmt::Display for RuntimeError {
 
 pub struct Vm {
     stack: Vec<Value>,
+    globals: HashMap<String, Value>,
     // What print writes, so tests can read a program's output without capturing stdout.
     pub output: Vec<String>,
     pub echo: bool,
@@ -31,6 +33,7 @@ impl Vm {
     pub fn new() -> Self {
         Vm {
             stack: Vec::with_capacity(256),
+            globals: HashMap::new(),
             output: Vec::new(),
             echo: false,
         }
@@ -169,8 +172,57 @@ impl Vm {
                     self.output.push(v.to_string());
                 }
                 Op::Return => return Ok(self.stack.pop()),
+                Op::DefineGlobal(k) => {
+                    let name = name_of(chunk, k);
+                    let value = self.pop();
+                    self.globals.insert(name, value);
+                }
+                Op::GetGlobal(k) => {
+                    let name = name_of(chunk, k);
+                    match self.globals.get(&name) {
+                        Some(v) => self.stack.push(v.clone()),
+                        None => {
+                            return Err(RuntimeError {
+                                message: format!("{name} is not defined"),
+                                at,
+                            });
+                        }
+                    }
+                }
+                Op::SetGlobal(k) => {
+                    let name = name_of(chunk, k);
+                    // Assigning never creates a variable, so a typo is an error rather than a new global.
+                    if !self.globals.contains_key(&name) {
+                        return Err(RuntimeError {
+                            message: format!("{name} is not defined; declare it with let first"),
+                            at,
+                        });
+                    }
+                    let value = self
+                        .stack
+                        .last()
+                        .expect("assignment leaves its value")
+                        .clone();
+                    self.globals.insert(name, value);
+                }
+                Op::GetLocal(slot) => self.stack.push(self.stack[slot as usize].clone()),
+                Op::SetLocal(slot) => {
+                    let value = self
+                        .stack
+                        .last()
+                        .expect("assignment leaves its value")
+                        .clone();
+                    self.stack[slot as usize] = value;
+                }
             }
         }
         Ok(None)
+    }
+}
+
+fn name_of(chunk: &Chunk, k: u16) -> String {
+    match &chunk.constants[k as usize] {
+        Value::Str(s) => s.clone(),
+        other => unreachable!("a global's name constant is a string, not {other}"),
     }
 }

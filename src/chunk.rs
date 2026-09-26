@@ -59,6 +59,13 @@ pub enum Op {
     Pop,
     Print,
     Return,
+    // Globals are looked up by name, the operand being the name's constant.
+    DefineGlobal(u16),
+    GetGlobal(u16),
+    SetGlobal(u16),
+    // Locals live on the stack; the operand is the slot, so no name is looked up at run time.
+    GetLocal(u16),
+    SetLocal(u16),
 }
 
 // Bytecode plus the line each instruction came from, kept beside it rather than
@@ -110,6 +117,16 @@ impl Chunk {
             };
             last_line = line;
             let text = match op {
+                Op::DefineGlobal(k) | Op::GetGlobal(k) | Op::SetGlobal(k) => {
+                    let name = format!("{op:?}");
+                    let name = name[..name.find('(').unwrap()].to_uppercase();
+                    format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
+                }
+                Op::GetLocal(slot) | Op::SetLocal(slot) => {
+                    let name = format!("{op:?}");
+                    let name = name[..name.find('(').unwrap()].to_uppercase();
+                    format!("{name:<12} {slot:>4}")
+                }
                 Op::Constant(k) => {
                     format!(
                         "{:<12} {k:>4} ({})",

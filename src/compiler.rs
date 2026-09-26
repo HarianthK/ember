@@ -15,10 +15,18 @@ impl fmt::Display for CompileError {
     }
 }
 
+struct Local {
+    name: String,
+    depth: usize,
+}
+
 pub struct Compiler {
     chunk: Chunk,
     // The span of the statement being compiled, for expressions that carry none of their own.
     at: Span,
+    // Locals in declaration order; a local's index here is its stack slot at run time.
+    locals: Vec<Local>,
+    depth: usize,
 }
 
 impl Compiler {
@@ -26,12 +34,40 @@ impl Compiler {
         Compiler {
             chunk: Chunk::new(),
             at: Span { line: 1, col: 1 },
+            locals: Vec::new(),
+            depth: 0,
         }
     }
 
     fn emit(&mut self, op: Op) {
         let at = self.at;
         self.chunk.push(op, at);
+    }
+
+    fn name_constant(&mut self, name: &str) -> u16 {
+        self.chunk.constant(Value::Str(name.to_string()))
+    }
+
+    // Searched from the end, so an inner declaration shadows an outer one of the same name.
+    fn resolve(&self, name: &str) -> Option<u16> {
+        self.locals
+            .iter()
+            .rposition(|l| l.name == name)
+            .map(|i| i as u16)
+    }
+
+    fn block(&mut self, body: &[Stmt]) -> Result<(), CompileError> {
+        self.depth += 1;
+        for stmt in body {
+            self.stmt(stmt)?;
+        }
+        self.depth -= 1;
+        // The block's locals are still on the stack; take them off as the scope ends.
+        while self.locals.last().is_some_and(|l| l.depth > self.depth) {
+            self.locals.pop();
+            self.emit(Op::Pop);
+        }
+        Ok(())
     }
 
     fn not_yet(&self, what: &str) -> CompileError {
@@ -61,9 +97,31 @@ impl Compiler {
                 // An expression statement leaves its value on the stack; nothing wants it.
                 self.emit(Op::Pop);
             }
-            Stmt::Let { at, .. } => {
+            Stmt::Let { name, value, at } => {
                 self.at = *at;
-                return Err(self.not_yet("let"));
+                // The value is compiled before the name exists, so `let x = x` reads the outer x.
+                self.expr(value)?;
+                self.at = *at;
+                if self.depth == 0 {
+                    let k = self.name_constant(name);
+                    self.emit(Op::DefineGlobal(k));
+                } else {
+                    if self
+                        .locals
+                        .iter()
+                        .any(|l| l.depth == self.depth && &l.name == name)
+                    {
+                        return Err(CompileError {
+                            message: format!("{name} is already declared in this block"),
+                            at: *at,
+                        });
+                    }
+                    // No instruction: the value just computed is already sitting in the local's slot.
+                    self.locals.push(Local {
+                        name: name.clone(),
+                        depth: self.depth,
+                    });
+                }
             }
             Stmt::Return { at, .. } => {
                 self.at = *at;
@@ -75,7 +133,7 @@ impl Compiler {
             }
             Stmt::If { .. } => return Err(self.not_yet("if")),
             Stmt::While { .. } => return Err(self.not_yet("while")),
-            Stmt::Block(_) => return Err(self.not_yet("a block")),
+            Stmt::Block(body) => self.block(body)?,
         }
         Ok(())
     }
@@ -120,6 +178,28 @@ impl Compiler {
                     BinOp::And | BinOp::Or => unreachable!("handled above"),
                 });
             }
+            Expr::Name(name) => match self.resolve(name) {
+                Some(slot) => self.emit(Op::GetLocal(slot)),
+                None => {
+                    let k = self.name_constant(name);
+                    self.emit(Op::GetGlobal(k));
+                }
+            },
+            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Name(_)) => {
+                let Expr::Name(name) = target.as_ref() else {
+                    unreachable!()
+                };
+                self.expr(value)?;
+                self.at = *at;
+                // Assignment is an expression, so the value stays on the stack after it is stored.
+                match self.resolve(name) {
+                    Some(slot) => self.emit(Op::SetLocal(slot)),
+                    None => {
+                        let k = self.name_constant(name);
+                        self.emit(Op::SetGlobal(k));
+                    }
+                }
+            }
             Expr::Call { at, .. }
             | Expr::Index { at, .. }
             | Expr::Field { at, .. }
@@ -133,7 +213,6 @@ impl Compiler {
                 };
                 return Err(self.not_yet(what));
             }
-            Expr::Name(_) => return Err(self.not_yet("a variable")),
             Expr::List(_) => return Err(self.not_yet("a list")),
             Expr::Map(_) => return Err(self.not_yet("a map")),
             Expr::Func { .. } => return Err(self.not_yet("a function")),
