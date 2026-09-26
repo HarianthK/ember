@@ -251,7 +251,7 @@ impl Parser {
             // Right associative, so a = b = c parses as a = (b = c).
             let value = self.assignment()?;
             return match left {
-                Expr::Name(_) | Expr::Index { .. } | Expr::Field { .. } => Ok(Expr::Assign {
+                Expr::Name(..) | Expr::Index { .. } | Expr::Field { .. } => Ok(Expr::Assign {
                     target: Box::new(left),
                     value: Box::new(value),
                     at,
@@ -273,10 +273,11 @@ impl Parser {
             if power < min_power {
                 break;
             }
+            let at = self.at();
             self.advance();
             // Left associative: the right side stops at anything binding this loosely.
             let right = self.binary(power + 1)?;
-            left = Expr::Binary(op, Box::new(left), Box::new(right));
+            left = Expr::Binary(op, Box::new(left), Box::new(right), at);
         }
         Ok(left)
     }
@@ -284,12 +285,14 @@ impl Parser {
     fn unary(&mut self) -> Result<Expr, ParseError> {
         match self.peek() {
             Tok::Minus => {
+                let at = self.at();
                 self.advance();
-                Ok(Expr::Unary(UnOp::Neg, Box::new(self.unary()?)))
+                Ok(Expr::Unary(UnOp::Neg, Box::new(self.unary()?), at))
             }
             Tok::Not => {
+                let at = self.at();
                 self.advance();
-                Ok(Expr::Unary(UnOp::Not, Box::new(self.unary()?)))
+                Ok(Expr::Unary(UnOp::Not, Box::new(self.unary()?), at))
             }
             _ => self.postfix(),
         }
@@ -365,7 +368,7 @@ impl Parser {
             }
             Tok::Name(name) => {
                 self.advance();
-                Ok(Expr::Name(name))
+                Ok(Expr::Name(name, at))
             }
             Tok::Fn => self.function(),
             Tok::LParen => {

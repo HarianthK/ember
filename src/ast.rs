@@ -49,11 +49,12 @@ pub enum Expr {
     Str(String),
     Bool(bool),
     Nil,
-    Name(String),
+    // Names and operators keep their position: they are what fails at run time.
+    Name(String, Span),
     List(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
-    Unary(UnOp, Box<Expr>),
-    Binary(BinOp, Box<Expr>, Box<Expr>),
+    Unary(UnOp, Box<Expr>, Span),
+    Binary(BinOp, Box<Expr>, Box<Expr>, Span),
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
@@ -184,7 +185,7 @@ pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
         Expr::Str(s) => format!("{s:?}"),
         Expr::Bool(b) => format!("{b}"),
         Expr::Nil => "nil".to_string(),
-        Expr::Name(name) => name.clone(),
+        Expr::Name(name, _) => name.clone(),
         Expr::List(items) => {
             format!(
                 "[{}]",
@@ -199,10 +200,10 @@ pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
                 .join(", ");
             format!("{{{inner}}}")
         }
-        Expr::Unary(UnOp::Neg, e) => format!("(-{})", print_expr_at(e, indent)),
-        Expr::Unary(UnOp::Not, e) => format!("(not {})", print_expr_at(e, indent)),
+        Expr::Unary(UnOp::Neg, e, _) => format!("(-{})", print_expr_at(e, indent)),
+        Expr::Unary(UnOp::Not, e, _) => format!("(not {})", print_expr_at(e, indent)),
         // Parentheses on every binary node, so the printed form shows how it grouped.
-        Expr::Binary(op, l, r) => {
+        Expr::Binary(op, l, r, _) => {
             format!(
                 "({} {} {})",
                 print_expr_at(l, indent),

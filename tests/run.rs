@@ -298,3 +298,17 @@ while i < 1000 {
         "the stack should be empty after the program"
     );
 }
+
+// Names and operators carry their own position. Before they did, an error inherited
+// whatever the compiler had seen last, which could be the statement before.
+#[test]
+fn errors_point_at_the_operator_or_name_that_failed() {
+    let e = err("print(1)\nnope + 1");
+    assert!(e.contains("nope is not defined at line 2, column 1"), "{e}");
+    let e = err("print(1)\n1 + \"a\"");
+    assert!(e.contains("at line 2, column 3"), "{e}");
+    let e = err("let x = 1\nlet y = 2\nlet z = -\"a\"");
+    assert!(e.contains("at line 3, column 9"), "{e}");
+    let e = err("print(1)\nprint(2 < nil)");
+    assert!(e.contains("at line 2, column 9"), "{e}");
+}

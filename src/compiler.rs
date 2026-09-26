@@ -129,7 +129,7 @@ impl Compiler {
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
             // print is a call to a function that does not exist yet, so it is spelled as an instruction until then.
-            Stmt::Expr(Expr::Call { callee, args, at }) if matches!(callee.as_ref(), Expr::Name(n) if n == "print") =>
+            Stmt::Expr(Expr::Call { callee, args, at }) if matches!(callee.as_ref(), Expr::Name(n, _) if n == "print") =>
             {
                 self.at = *at;
                 if args.len() != 1 {
@@ -290,8 +290,9 @@ impl Compiler {
             Expr::Bool(true) => self.emit(Op::True),
             Expr::Bool(false) => self.emit(Op::False),
             Expr::Nil => self.emit(Op::Nil),
-            Expr::Unary(op, operand) => {
+            Expr::Unary(op, operand, at) => {
                 self.expr(operand)?;
+                self.at = *at;
                 self.emit(match op {
                     UnOp::Neg => Op::Neg,
                     UnOp::Not => Op::Not,
@@ -299,15 +300,17 @@ impl Compiler {
             }
             // The right side only runs when the left does not decide it, and the result is
             // whichever operand decided, so `name or "default"` works as it does in Python.
-            Expr::Binary(BinOp::And, left, right) => {
+            Expr::Binary(BinOp::And, left, right, at) => {
                 self.expr(left)?;
+                self.at = *at;
                 let to_end = self.jump(Op::JumpIfFalse);
                 self.emit(Op::Pop);
                 self.expr(right)?;
                 self.patch(to_end)?;
             }
-            Expr::Binary(BinOp::Or, left, right) => {
+            Expr::Binary(BinOp::Or, left, right, at) => {
                 self.expr(left)?;
+                self.at = *at;
                 let to_right = self.jump(Op::JumpIfFalse);
                 let to_end = self.jump(Op::Jump);
                 self.patch(to_right)?;
@@ -315,10 +318,11 @@ impl Compiler {
                 self.expr(right)?;
                 self.patch(to_end)?;
             }
-            Expr::Binary(op, left, right) => {
+            Expr::Binary(op, left, right, at) => {
                 // Operands in source order, so the stack holds left then right when the op runs.
                 self.expr(left)?;
                 self.expr(right)?;
+                self.at = *at;
                 self.emit(match op {
                     BinOp::Add => Op::Add,
                     BinOp::Sub => Op::Sub,
@@ -334,16 +338,19 @@ impl Compiler {
                     BinOp::And | BinOp::Or => unreachable!("handled above"),
                 });
             }
-            Expr::Name(name) => match self.resolve(name) {
-                Some(slot) => self.emit(Op::GetLocal(slot)),
-                None => {
-                    self.check_reachable(name)?;
-                    let k = self.name_constant(name);
-                    self.emit(Op::GetGlobal(k));
+            Expr::Name(name, at) => {
+                self.at = *at;
+                match self.resolve(name) {
+                    Some(slot) => self.emit(Op::GetLocal(slot)),
+                    None => {
+                        self.check_reachable(name)?;
+                        let k = self.name_constant(name);
+                        self.emit(Op::GetGlobal(k));
+                    }
                 }
-            },
-            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Name(_)) => {
-                let Expr::Name(name) = target.as_ref() else {
+            }
+            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Name(..)) => {
+                let Expr::Name(name, _) = target.as_ref() else {
                     unreachable!()
                 };
                 self.expr(value)?;
