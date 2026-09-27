@@ -1,6 +1,6 @@
-use crate::chunk::{Chunk, Closure, Function, Native, Op, Upvalue, Value};
+use crate::chunk::{Chunk, Function, Native, Op, Value};
+use crate::heap::{Closure, Heap, Obj, Ref, Upvalue};
 use crate::lexer::Span;
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
@@ -8,9 +8,11 @@ use std::rc::Rc;
 // Deep enough for any honest recursion, shallow enough to stop a runaway one quickly.
 const MAX_FRAMES: usize = 10_000;
 
-// A function call in progress. `base` is where its slot 0 sits on the shared stack.
+// A function call in progress. `base` is where its slot 0 sits on the shared stack. The
+// function is kept beside its closure because every instruction reads it.
 struct Frame {
-    closure: Rc<Closure>,
+    closure: Ref,
+    function: Rc<Function>,
     ip: usize,
     base: usize,
 }
@@ -60,7 +62,8 @@ pub struct Vm {
     globals: HashMap<String, Value>,
     // Upvalues still pointing at a live stack slot, so a second capture of the same slot
     // finds and shares the first rather than making a copy.
-    open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
+    open_upvalues: Vec<Ref>,
+    pub heap: Heap,
     // What print writes, so tests can read a program's output without capturing stdout.
     pub output: Vec<String>,
     pub echo: bool,
@@ -79,6 +82,7 @@ impl Vm {
             frames: Vec::new(),
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
+            heap: Heap::default(),
             output: Vec::new(),
             echo: false,
         };
@@ -125,9 +129,9 @@ impl Vm {
                 let line = if i + 1 == self.frames.len() {
                     fault.at.line
                 } else {
-                    frame.closure.function.chunk.span(frame.ip - 1).line
+                    frame.function.chunk.span(frame.ip - 1).line
                 };
-                trace.push((frame.closure.function.name.clone(), line));
+                trace.push((frame.function.name.clone(), line));
             }
             // Leave the machine ready for the next program, which is what a REPL will need.
             self.stack.clear();
@@ -142,50 +146,58 @@ impl Vm {
     }
 
     // The upvalue for an absolute stack slot, shared with any closure that already captured it.
-    fn capture(&mut self, slot: usize) -> Rc<RefCell<Upvalue>> {
+    fn capture(&mut self, slot: usize) -> Ref {
+        let heap = &self.heap;
         let existing = self
             .open_upvalues
             .iter()
-            .find(|u| matches!(*u.borrow(), Upvalue::Open(s) if s == slot));
-        if let Some(up) = existing {
-            return Rc::clone(up);
+            .find(|&&r| matches!(heap.upvalue(r), Upvalue::Open(s) if *s == slot));
+        if let Some(&up) = existing {
+            return up;
         }
-        let up = Rc::new(RefCell::new(Upvalue::Open(slot)));
-        self.open_upvalues.push(Rc::clone(&up));
+        let up = self.heap.alloc(Obj::Upvalue(Upvalue::Open(slot)));
+        self.open_upvalues.push(up);
         up
     }
 
     // Slots from `from` upwards are about to disappear; every upvalue pointing at one of
     // them takes its value off the stack and keeps it.
     fn close_from(&mut self, from: usize) {
+        let heap = &mut self.heap;
         let stack = &self.stack;
-        self.open_upvalues.retain(|up| {
-            let slot = match *up.borrow() {
-                Upvalue::Open(slot) if slot >= from => slot,
+        self.open_upvalues.retain(|&up| {
+            let slot = match heap.upvalue(up) {
+                Upvalue::Open(slot) if *slot >= from => *slot,
                 _ => return true,
             };
-            *up.borrow_mut() = Upvalue::Closed(stack[slot].clone());
+            *heap.upvalue_mut(up) = Upvalue::Closed(stack[slot].clone());
             false
         });
     }
 
+    fn new_list(&mut self, items: Vec<Value>) -> Value {
+        Value::List(self.heap.alloc(Obj::List(items)))
+    }
+
     fn execute(&mut self, script: Rc<Function>) -> Result<Value, Fault> {
-        let script = Rc::new(Closure {
-            function: script,
+        let closure = self.heap.alloc(Obj::Closure(Closure {
+            function: Rc::clone(&script),
             upvalues: Vec::new(),
-        });
-        self.stack.push(Value::Closure(Rc::clone(&script)));
+        }));
+        self.stack.push(Value::Closure(closure));
         self.frames.push(Frame {
-            closure: Rc::clone(&script),
+            closure,
+            function: Rc::clone(&script),
             ip: 0,
             base: 0,
         });
         // The running frame's state is kept in locals and written back only on a call.
-        let mut closure = script;
+        let mut closure = closure;
+        let mut func = script;
         let mut ip = 0;
         let mut base = 0;
         loop {
-            let chunk = &closure.function.chunk;
+            let chunk = &func.chunk;
             let op = chunk.code[ip];
             let at = chunk.span(ip);
             ip += 1;
@@ -203,9 +215,9 @@ impl Vm {
                         (Value::Str(x), Value::Str(y)) => Value::Str(x + &y),
                         // Joining makes a new list; neither operand changes.
                         (Value::List(x), Value::List(y)) => {
-                            let mut joined = x.borrow().clone();
-                            joined.extend(y.borrow().iter().cloned());
-                            Value::List(Rc::new(RefCell::new(joined)))
+                            let mut joined = self.heap.list(x).clone();
+                            joined.extend(self.heap.list(y).iter().cloned());
+                            self.new_list(joined)
                         }
                         (a, b) => {
                             return Err(Fault {
@@ -301,7 +313,8 @@ impl Vm {
                     let Some(caller) = self.frames.last() else {
                         return Ok(result);
                     };
-                    closure = Rc::clone(&caller.closure);
+                    closure = caller.closure;
+                    func = Rc::clone(&caller.function);
                     ip = caller.ip;
                     base = caller.base;
                     self.stack.push(result);
@@ -309,7 +322,7 @@ impl Vm {
                 Op::Call(argc) => {
                     let callee_at = self.stack.len() - 1 - argc as usize;
                     let callee = match &self.stack[callee_at] {
-                        Value::Closure(c) => Rc::clone(c),
+                        Value::Closure(c) => *c,
                         Value::Native(native) => {
                             let native = Rc::clone(native);
                             if native.arity.is_some_and(|n| n != argc) {
@@ -337,14 +350,14 @@ impl Vm {
                             });
                         }
                     };
-                    let func = &callee.function;
-                    if func.arity != argc {
+                    let callee_func = Rc::clone(&self.heap.closure(callee).function);
+                    if callee_func.arity != argc {
                         return Err(Fault {
                             message: format!(
                                 "{} takes {} argument{}, but was given {argc}",
-                                func.name,
-                                func.arity,
-                                if func.arity == 1 { "" } else { "s" }
+                                callee_func.name,
+                                callee_func.arity,
+                                if callee_func.arity == 1 { "" } else { "s" }
                             ),
                             at,
                         });
@@ -353,18 +366,20 @@ impl Vm {
                         return Err(Fault {
                             message: format!(
                                 "stack overflow: more than {MAX_FRAMES} calls deep, in {}",
-                                func.name
+                                callee_func.name
                             ),
                             at,
                         });
                     }
                     self.frames.last_mut().expect("a caller").ip = ip;
                     self.frames.push(Frame {
-                        closure: Rc::clone(&callee),
+                        closure: callee,
+                        function: Rc::clone(&callee_func),
                         ip: 0,
                         base: callee_at,
                     });
                     closure = callee;
+                    func = callee_func;
                     ip = 0;
                     base = callee_at;
                 }
@@ -408,28 +423,30 @@ impl Vm {
                     }
                 }
                 Op::Closure(k) => {
-                    let Value::Function(func) = &chunk.constants[k as usize] else {
+                    let Value::Function(made) = &chunk.constants[k as usize] else {
                         unreachable!("a closure is made from a function constant");
                     };
-                    let func = Rc::clone(func);
-                    let upvalues = func
+                    let made = Rc::clone(made);
+                    let upvalues = made
                         .upvalues
                         .iter()
                         .map(|r| {
                             if r.is_local {
                                 self.capture(base + r.index as usize)
                             } else {
-                                Rc::clone(&closure.upvalues[r.index as usize])
+                                self.heap.closure(closure).upvalues[r.index as usize]
                             }
                         })
                         .collect();
-                    self.stack.push(Value::Closure(Rc::new(Closure {
-                        function: func,
+                    let c = self.heap.alloc(Obj::Closure(Closure {
+                        function: made,
                         upvalues,
-                    })));
+                    }));
+                    self.stack.push(Value::Closure(c));
                 }
                 Op::GetUpvalue(i) => {
-                    let value = match &*closure.upvalues[i as usize].borrow() {
+                    let up = self.heap.closure(closure).upvalues[i as usize];
+                    let value = match self.heap.upvalue(up) {
                         Upvalue::Open(slot) => self.stack[*slot].clone(),
                         Upvalue::Closed(v) => v.clone(),
                     };
@@ -441,7 +458,8 @@ impl Vm {
                         .last()
                         .expect("assignment leaves its value")
                         .clone();
-                    match &mut *closure.upvalues[i as usize].borrow_mut() {
+                    let up = self.heap.closure(closure).upvalues[i as usize];
+                    match self.heap.upvalue_mut(up) {
                         Upvalue::Open(slot) => self.stack[*slot] = value,
                         Upvalue::Closed(v) => *v = value,
                     }
@@ -452,7 +470,8 @@ impl Vm {
                 }
                 Op::BuildList(n) => {
                     let items = self.stack.split_off(self.stack.len() - n as usize);
-                    self.stack.push(Value::List(Rc::new(RefCell::new(items))));
+                    let list = self.new_list(items);
+                    self.stack.push(list);
                 }
                 Op::BuildMap(n) => {
                     let flat = self.stack.split_off(self.stack.len() - 2 * n as usize);
@@ -460,14 +479,15 @@ impl Vm {
                     for pair in flat.chunks(2) {
                         entries.insert(map_key(&pair[0], at)?, pair[1].clone());
                     }
-                    self.stack.push(Value::Map(Rc::new(RefCell::new(entries))));
+                    let map = self.heap.alloc(Obj::Map(entries));
+                    self.stack.push(Value::Map(map));
                 }
                 Op::GetIndex => {
                     let index = self.pop();
                     let target = self.pop();
                     let value = match &target {
-                        Value::List(items) => {
-                            let items = items.borrow();
+                        Value::List(r) => {
+                            let items = self.heap.list(*r);
                             items[whole_index(&index, items.len(), "list", at)?].clone()
                         }
                         // By character, not byte, so "héllo"[1] is "é".
@@ -476,9 +496,9 @@ impl Vm {
                             Value::Str(s.chars().nth(i).expect("checked above").to_string())
                         }
                         // A missing key is an error, as an undefined variable is; has() asks first.
-                        Value::Map(entries) => {
+                        Value::Map(r) => {
                             let key = map_key(&index, at)?;
-                            match entries.borrow().get(&key) {
+                            match self.heap.map(*r).get(&key) {
                                 Some(v) => v.clone(),
                                 None => {
                                     return Err(Fault {
@@ -502,13 +522,13 @@ impl Vm {
                     let index = self.pop();
                     let target = self.pop();
                     match &target {
-                        Value::List(items) => {
-                            let i = whole_index(&index, items.borrow().len(), "list", at)?;
-                            items.borrow_mut()[i] = value.clone();
+                        Value::List(r) => {
+                            let i = whole_index(&index, self.heap.list(*r).len(), "list", at)?;
+                            self.heap.list_mut(*r)[i] = value.clone();
                         }
-                        Value::Map(entries) => {
+                        Value::Map(r) => {
                             let key = map_key(&index, at)?;
-                            entries.borrow_mut().insert(key, value.clone());
+                            self.heap.map_mut(*r).insert(key, value.clone());
                         }
                         other => {
                             return Err(Fault {
@@ -524,7 +544,7 @@ impl Vm {
                 }
                 Op::Len => {
                     let n = match self.pop() {
-                        Value::List(items) => items.borrow().len(),
+                        Value::List(r) => self.heap.list(r).len(),
                         Value::Str(s) => s.chars().count(),
                         Value::Map(_) => {
                             return Err(Fault {
@@ -629,24 +649,24 @@ const NATIVES: [Native; 6] = [
 ];
 
 // A map's keys as a new list, in the same sorted order the map prints in.
-fn native_keys(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+fn native_keys(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
-        Value::Map(entries) => Ok(Value::List(Rc::new(RefCell::new(
-            entries
-                .borrow()
+        Value::Map(r) => {
+            let keys = vm
+                .heap
+                .map(*r)
                 .keys()
                 .map(|k| Value::Str(k.clone()))
-                .collect(),
-        )))),
+                .collect();
+            Ok(vm.new_list(keys))
+        }
         other => Err(format!("keys needs a map, not a {}", other.type_name())),
     }
 }
 
-fn native_has(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+fn native_has(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match (&args[0], &args[1]) {
-        (Value::Map(entries), Value::Str(key)) => {
-            Ok(Value::Bool(entries.borrow().contains_key(key)))
-        }
+        (Value::Map(r), Value::Str(key)) => Ok(Value::Bool(vm.heap.map(*r).contains_key(key))),
         (Value::Map(_), other) => Err(format!(
             "map keys must be strings, not a {}",
             other.type_name()
@@ -655,11 +675,11 @@ fn native_has(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     }
 }
 
-fn native_len(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+fn native_len(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
-        Value::List(items) => Ok(Value::Number(items.borrow().len() as f64)),
+        Value::List(r) => Ok(Value::Number(vm.heap.list(*r).len() as f64)),
         Value::Str(s) => Ok(Value::Number(s.chars().count() as f64)),
-        Value::Map(entries) => Ok(Value::Number(entries.borrow().len() as f64)),
+        Value::Map(r) => Ok(Value::Number(vm.heap.map(*r).len() as f64)),
         other => Err(format!(
             "len needs a list, a string or a map, not a {}",
             other.type_name()
@@ -668,10 +688,10 @@ fn native_len(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 }
 
 // Adds to the end of the list itself, so every name for that list sees it.
-fn native_push(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+fn native_push(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
-        Value::List(items) => {
-            items.borrow_mut().push(args[1].clone());
+        Value::List(r) => {
+            vm.heap.list_mut(*r).push(args[1].clone());
             Ok(Value::Nil)
         }
         other => Err(format!("push needs a list, not a {}", other.type_name())),
@@ -682,7 +702,7 @@ fn native_push(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 fn native_print(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     let line = args
         .iter()
-        .map(|v| v.to_string())
+        .map(|v| vm.heap.show(v))
         .collect::<Vec<_>>()
         .join(" ");
     if vm.echo {

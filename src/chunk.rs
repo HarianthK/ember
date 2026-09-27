@@ -1,11 +1,9 @@
+use crate::heap::Ref;
 use crate::lexer::Span;
 use crate::vm::Vm;
-use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
-// Rc for now; phase 4 replaces it with handles into a heap the collector owns.
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
@@ -14,12 +12,12 @@ pub enum Value {
     Nil,
     // A compiled function as it sits in the constant table; only a closure is ever called.
     Function(Rc<Function>),
-    Closure(Rc<Closure>),
     Native(Rc<Native>),
-    // Shared and mutable: `let b = a` makes b the same list, as in Python.
-    List(Rc<RefCell<Vec<Value>>>),
-    // String keys only, as in JSON. Kept sorted, so a map always prints the same way.
-    Map(Rc<RefCell<BTreeMap<String, Value>>>),
+    // Objects the collector manages. The value is a handle into the VM's heap, so
+    // `let b = a` makes b the same list, as in Python.
+    Closure(Ref),
+    List(Ref),
+    Map(Ref),
 }
 
 // A function written in Rust. `arity` of None takes any number of arguments.
@@ -52,21 +50,8 @@ pub struct UpvalueRef {
     pub index: u16,
 }
 
-// A captured variable. Open while its scope is alive, pointing at the stack slot; closed
-// when the scope ends, holding the value itself. Closures that share it see one variable.
-#[derive(Debug)]
-pub enum Upvalue {
-    Open(usize),
-    Closed(Value),
-}
-
-#[derive(Debug)]
-pub struct Closure {
-    pub function: Rc<Function>,
-    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
-}
-
-// Two functions are equal only if they are the same function, never by comparing code.
+// Functions, lists and maps are equal only to themselves. Lists compare by identity, as in
+// Lua and JavaScript, because a list can contain itself and comparing contents would not end.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -75,12 +60,10 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
-            (Value::Closure(a), Value::Closure(b)) => Rc::ptr_eq(a, b),
             (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
-            // Lists compare by identity, as in Lua and JavaScript; a list can contain itself,
-            // and comparing contents would then never finish.
-            (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
-            (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
+            (Value::Closure(a), Value::Closure(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
+            (Value::Map(a), Value::Map(b)) => a == b,
             _ => false,
         }
     }
@@ -105,75 +88,22 @@ impl Value {
     }
 }
 
+// Without the heap there is no way to see inside a list; Heap::show prints the contents.
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_value(f, self, &mut Vec::new(), false)
-    }
-}
-
-// Strings inside a list or map are quoted so ["1"] and [1] print differently. A list or
-// map met again while it is being printed is shown as [...] or {...}, as Python does,
-// instead of recursing forever.
-fn write_value(
-    f: &mut fmt::Formatter<'_>,
-    value: &Value,
-    open: &mut Vec<*const ()>,
-    quoted: bool,
-) -> fmt::Result {
-    match value {
-        Value::Str(s) if quoted => write!(f, "{s:?}"),
-        Value::Map(entries) => {
-            let ptr = Rc::as_ptr(entries) as *const ();
-            if open.contains(&ptr) {
-                return write!(f, "{{...}}");
-            }
-            open.push(ptr);
-            write!(f, "{{")?;
-            for (i, (key, item)) in entries.borrow().iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{key:?}: ")?;
-                write_value(f, item, open, true)?;
-            }
-            open.pop();
-            write!(f, "}}")
-        }
-        Value::List(items) => {
-            let ptr = Rc::as_ptr(items) as *const ();
-            if open.contains(&ptr) {
-                return write!(f, "[...]");
-            }
-            open.push(ptr);
-            write!(f, "[")?;
-            for (i, item) in items.borrow().iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write_value(f, item, open, true)?;
-            }
-            open.pop();
-            write!(f, "]")
-        }
-        other => other.fmt_plain(f),
-    }
-}
-
-impl Value {
-    fn fmt_plain(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(n) => write!(f, "{n}"),
             Value::Str(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Nil => write!(f, "nil"),
             Value::Function(func) => write!(f, "<fn {}>", func.name),
-            Value::Closure(c) => write!(f, "<fn {}>", c.function.name),
             Value::Native(native) => write!(f, "<native {}>", native.name),
-            Value::List(_) | Value::Map(_) => unreachable!("written by write_value"),
+            Value::Closure(_) => write!(f, "<fn>"),
+            Value::List(_) => write!(f, "<list>"),
+            Value::Map(_) => write!(f, "<map>"),
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     // Operand is an index into the constant table.
