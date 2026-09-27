@@ -175,6 +175,23 @@ impl Vm {
         });
     }
 
+    // Runs only between instructions. By then every live value is on the stack, in a
+    // global, in a frame or in an open upvalue, so those four are all the roots there are;
+    // no half-built value can be sitting in a Rust variable where marking cannot see it.
+    pub fn collect(&mut self) {
+        let mut roots: Vec<Ref> = Vec::new();
+        let handle = |v: &Value| match v {
+            Value::List(r) | Value::Map(r) | Value::Closure(r) => Some(*r),
+            _ => None,
+        };
+        roots.extend(self.stack.iter().filter_map(handle));
+        roots.extend(self.globals.values().filter_map(handle));
+        roots.extend(self.frames.iter().map(|f| f.closure));
+        roots.extend(self.open_upvalues.iter().copied());
+        self.heap.mark(roots);
+        self.heap.sweep();
+    }
+
     fn new_list(&mut self, items: Vec<Value>) -> Value {
         Value::List(self.heap.alloc(Obj::List(items)))
     }
@@ -197,6 +214,9 @@ impl Vm {
         let mut ip = 0;
         let mut base = 0;
         loop {
+            if self.heap.wants_collection() {
+                self.collect();
+            }
             let chunk = &func.chunk;
             let op = chunk.code[ip];
             let at = chunk.span(ip);

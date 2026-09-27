@@ -30,27 +30,109 @@ pub enum Obj {
     Upvalue(Upvalue),
 }
 
+// Collect once this many objects are alive, and after that when the count doubles.
+const FIRST_COLLECTION: usize = 1024;
+
 // Every object the program creates lives here. A freed slot goes on the free list and is
 // reused, so handles stay small; reading a freed slot panics rather than reading garbage.
-#[derive(Default)]
 pub struct Heap {
     slots: Vec<Option<Obj>>,
+    marks: Vec<bool>,
     free: Vec<u32>,
+    next_collection: usize,
+    allocated_since_collection: usize,
+    // Collect before every instruction that follows an allocation, and never reuse a
+    // freed slot, so a handle the collector wrongly freed fails the moment it is used.
+    pub stress: bool,
+    pub collections: usize,
+    pub freed: usize,
+}
+
+impl Default for Heap {
+    fn default() -> Self {
+        Heap {
+            slots: Vec::new(),
+            marks: Vec::new(),
+            free: Vec::new(),
+            next_collection: FIRST_COLLECTION,
+            allocated_since_collection: 0,
+            stress: false,
+            collections: 0,
+            freed: 0,
+        }
+    }
 }
 
 impl Heap {
     pub fn alloc(&mut self, obj: Obj) -> Ref {
-        if let Some(i) = self.free.pop() {
-            self.slots[i as usize] = Some(obj);
-            return Ref(i);
+        self.allocated_since_collection += 1;
+        if !self.stress {
+            if let Some(i) = self.free.pop() {
+                self.slots[i as usize] = Some(obj);
+                return Ref(i);
+            }
         }
         self.slots.push(Some(obj));
+        self.marks.push(false);
         Ref((self.slots.len() - 1) as u32)
+    }
+
+    pub fn wants_collection(&self) -> bool {
+        if self.stress {
+            self.allocated_since_collection > 0
+        } else {
+            self.live() >= self.next_collection
+        }
+    }
+
+    // Marks everything reachable from the roots. Works from a list of objects still to
+    // look inside rather than by recursion, so a list a million deep cannot overflow the
+    // Rust stack.
+    pub fn mark(&mut self, mut pending: Vec<Ref>) {
+        while let Some(r) = pending.pop() {
+            let i = r.0 as usize;
+            if self.marks[i] {
+                continue;
+            }
+            self.marks[i] = true;
+            let children = |v: &Value| match v {
+                Value::List(c) | Value::Map(c) | Value::Closure(c) => Some(*c),
+                _ => None,
+            };
+            match self.get(r) {
+                Obj::List(items) => pending.extend(items.iter().filter_map(children)),
+                Obj::Map(entries) => pending.extend(entries.values().filter_map(children)),
+                Obj::Closure(c) => pending.extend(c.upvalues.iter().copied()),
+                Obj::Upvalue(Upvalue::Closed(v)) => pending.extend(children(v)),
+                // An open upvalue's value is on the stack, which is a root already.
+                Obj::Upvalue(Upvalue::Open(_)) => {}
+            }
+        }
+    }
+
+    // Frees every object mark did not reach, and clears the marks for next time.
+    pub fn sweep(&mut self) {
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if slot.is_some() && !self.marks[i] {
+                *slot = None;
+                self.free.push(i as u32);
+                self.freed += 1;
+            }
+            self.marks[i] = false;
+        }
+        self.collections += 1;
+        self.allocated_since_collection = 0;
+        self.next_collection = (self.live() * 2).max(FIRST_COLLECTION);
     }
 
     // How many objects are alive, which is what the collector's tests measure.
     pub fn live(&self) -> usize {
         self.slots.len() - self.free.len()
+    }
+
+    // Slots ever made, live or free: the high-water mark of the heap.
+    pub fn slots_used(&self) -> usize {
+        self.slots.len()
     }
 
     fn get(&self, r: Ref) -> &Obj {
