@@ -116,8 +116,23 @@ impl Compiler {
         for stmt in body {
             self.stmt(stmt)?;
         }
+        self.end_scope();
+        Ok(())
+    }
+
+    fn declare(&mut self, name: &str) -> u16 {
+        let depth = self.st_ref().depth;
+        self.st().locals.push(Local {
+            name: name.to_string(),
+            depth,
+            captured: false,
+        });
+        (self.st_ref().locals.len() - 1) as u16
+    }
+
+    fn end_scope(&mut self) {
         self.st().depth -= 1;
-        // The block's locals are still on the stack; take them off as the scope ends.
+        // The scope's locals are still on the stack; take them off as it ends.
         loop {
             let depth = self.st_ref().depth;
             let Some(local) = self.st().locals.pop_if(|l| l.depth > depth) else {
@@ -129,6 +144,56 @@ impl Compiler {
                 Op::Pop
             });
         }
+    }
+
+    fn constant(&mut self, value: Value) {
+        let k = self.st().chunk.constant(value);
+        self.emit(Op::Constant(k));
+    }
+
+    // `for x in seq` counts through seq with two hidden locals. Their names start with a
+    // space, which no name in a program can, so the loop cannot be interfered with.
+    fn for_loop(
+        &mut self,
+        name: &str,
+        iter: &Expr,
+        body: &[Stmt],
+        at: Span,
+    ) -> Result<(), CompileError> {
+        self.at = at;
+        self.st().depth += 1;
+        self.expr(iter)?;
+        self.at = at;
+        let seq = self.declare(" seq");
+        self.constant(Value::Number(0.0));
+        let i = self.declare(" i");
+        let start = self.here()?;
+        self.emit(Op::GetLocal(i));
+        self.emit(Op::GetLocal(seq));
+        self.emit(Op::Len);
+        self.emit(Op::Less);
+        let to_exit = self.jump(Op::JumpIfFalse);
+        self.emit(Op::Pop);
+        // A fresh scope each pass, so a closure made in the body captures that pass's item.
+        self.st().depth += 1;
+        self.emit(Op::GetLocal(seq));
+        self.emit(Op::GetLocal(i));
+        self.emit(Op::GetIndex);
+        self.declare(name);
+        for stmt in body {
+            self.stmt(stmt)?;
+        }
+        self.at = at;
+        self.end_scope();
+        self.emit(Op::GetLocal(i));
+        self.constant(Value::Number(1.0));
+        self.emit(Op::Add);
+        self.emit(Op::SetLocal(i));
+        self.emit(Op::Pop);
+        self.emit(Op::Jump(start));
+        self.patch(to_exit)?;
+        self.emit(Op::Pop);
+        self.end_scope();
         Ok(())
     }
 
@@ -215,10 +280,12 @@ impl Compiler {
                 self.at = *at;
                 self.emit(Op::Return);
             }
-            Stmt::For { at, .. } => {
-                self.at = *at;
-                return Err(self.not_yet("for"));
-            }
+            Stmt::For {
+                name,
+                iter,
+                body,
+                at,
+            } => self.for_loop(name, iter, body, *at)?,
             Stmt::If {
                 cond,
                 then,
@@ -419,16 +486,41 @@ impl Compiler {
                 self.emit(Op::Call(argc));
             }
             Expr::Func { name, params, body } => self.function(name, params, body)?,
-            Expr::Index { at, .. } | Expr::Field { at, .. } | Expr::Assign { at, .. } => {
-                self.at = *at;
-                let what = match expr {
-                    Expr::Index { .. } => "indexing",
-                    Expr::Field { .. } => "a field",
-                    _ => "assignment",
-                };
-                return Err(self.not_yet(what));
+            Expr::List(items) => {
+                for item in items {
+                    self.expr(item)?;
+                }
+                let n = u16::try_from(items.len()).map_err(|_| CompileError {
+                    message: "a list literal can hold at most 65535 items".into(),
+                    at: self.at,
+                })?;
+                self.emit(Op::BuildList(n));
             }
-            Expr::List(_) => return Err(self.not_yet("a list")),
+            Expr::Index { target, index, at } => {
+                self.expr(target)?;
+                self.expr(index)?;
+                self.at = *at;
+                self.emit(Op::GetIndex);
+            }
+            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Index { .. }) => {
+                let Expr::Index {
+                    target: list,
+                    index,
+                    ..
+                } = target.as_ref()
+                else {
+                    unreachable!()
+                };
+                self.expr(list)?;
+                self.expr(index)?;
+                self.expr(value)?;
+                self.at = *at;
+                self.emit(Op::SetIndex);
+            }
+            Expr::Field { at, .. } | Expr::Assign { at, .. } => {
+                self.at = *at;
+                return Err(self.not_yet("a field"));
+            }
             Expr::Map(_) => return Err(self.not_yet("a map")),
         }
         Ok(())

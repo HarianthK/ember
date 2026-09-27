@@ -60,7 +60,10 @@ fn statements_run_in_order_and_leave_the_stack_clean() {
 #[test]
 fn runtime_errors_say_what_and_where() {
     let e = err("print(1)\nprint(1 + \"a\")");
-    assert!(e.contains("+ needs two numbers or two strings"), "{e}");
+    assert!(
+        e.contains("+ needs two numbers, two strings or two lists"),
+        "{e}"
+    );
     assert!(e.contains("a number and a string"), "{e}");
     assert!(e.contains("line 2"), "{e}");
 
@@ -71,8 +74,7 @@ fn runtime_errors_say_what_and_where() {
 
 #[test]
 fn unfinished_parts_say_so_rather_than_misbehave() {
-    assert!(err("for x in y { print(x) }").contains("for is not compiled yet"));
-    assert!(err("let xs = [1]").contains("a list is not compiled yet"));
+    assert!(err("let m = {\"a\": 1}").contains("a map is not compiled yet"));
 }
 
 #[test]

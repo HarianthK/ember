@@ -15,6 +15,8 @@ pub enum Value {
     Function(Rc<Function>),
     Closure(Rc<Closure>),
     Native(Rc<Native>),
+    // Shared and mutable: `let b = a` makes b the same list, as in Python.
+    List(Rc<RefCell<Vec<Value>>>),
 }
 
 // A function written in Rust. `arity` of None takes any number of arguments.
@@ -72,6 +74,9 @@ impl PartialEq for Value {
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
             (Value::Closure(a), Value::Closure(b)) => Rc::ptr_eq(a, b),
             (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
+            // Lists compare by identity, as in Lua and JavaScript; a list can contain itself,
+            // and comparing contents would then never finish.
+            (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -90,12 +95,49 @@ impl Value {
             Value::Bool(_) => "boolean",
             Value::Nil => "nil",
             Value::Function(_) | Value::Closure(_) | Value::Native(_) => "function",
+            Value::List(_) => "list",
         }
     }
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_value(f, self, &mut Vec::new(), false)
+    }
+}
+
+// Strings inside a list are quoted so ["1"] and [1] print differently. A list met again
+// while it is being printed is shown as [...], as Python does, instead of recursing forever.
+fn write_value(
+    f: &mut fmt::Formatter<'_>,
+    value: &Value,
+    open: &mut Vec<*const RefCell<Vec<Value>>>,
+    quoted: bool,
+) -> fmt::Result {
+    match value {
+        Value::Str(s) if quoted => write!(f, "{s:?}"),
+        Value::List(items) => {
+            let ptr = Rc::as_ptr(items);
+            if open.contains(&ptr) {
+                return write!(f, "[...]");
+            }
+            open.push(ptr);
+            write!(f, "[")?;
+            for (i, item) in items.borrow().iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write_value(f, item, open, true)?;
+            }
+            open.pop();
+            write!(f, "]")
+        }
+        other => other.fmt_plain(f),
+    }
+}
+
+impl Value {
+    fn fmt_plain(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(n) => write!(f, "{n}"),
             Value::Str(s) => write!(f, "{s}"),
@@ -104,6 +146,7 @@ impl fmt::Display for Value {
             Value::Function(func) => write!(f, "<fn {}>", func.name),
             Value::Closure(c) => write!(f, "<fn {}>", c.function.name),
             Value::Native(native) => write!(f, "<native {}>", native.name),
+            Value::List(_) => unreachable!("lists are written by write_value"),
         }
     }
 }
@@ -145,6 +188,12 @@ pub enum Op {
     SetUpvalue(u16),
     // Ends a local that a closure captured: its value moves off the stack into the upvalue.
     CloseUpvalue,
+    // Takes that many values off the stack, in order, into a new list.
+    BuildList(u16),
+    GetIndex,
+    SetIndex,
+    // The length of the list or string on top of the stack, for `for` to count with.
+    Len,
     // Jumps name the instruction to go to, not a distance, so one op serves both directions.
     Jump(u16),
     // Leaves the condition on the stack; the code on each side pops it.
@@ -206,6 +255,7 @@ impl Chunk {
                     format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
                 }
                 Op::Call(argc) => format!("{:<12} {argc:>4}", "CALL"),
+                Op::BuildList(n) => format!("{:<12} {n:>4}", "BUILDLIST"),
                 Op::Closure(k) => {
                     let captures = match &self.constants[*k as usize] {
                         Value::Function(func) => func

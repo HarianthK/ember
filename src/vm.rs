@@ -201,10 +201,16 @@ impl Vm {
                     let result = match (a, b) {
                         (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
                         (Value::Str(x), Value::Str(y)) => Value::Str(x + &y),
+                        // Joining makes a new list; neither operand changes.
+                        (Value::List(x), Value::List(y)) => {
+                            let mut joined = x.borrow().clone();
+                            joined.extend(y.borrow().iter().cloned());
+                            Value::List(Rc::new(RefCell::new(joined)))
+                        }
                         (a, b) => {
                             return Err(Fault {
                                 message: format!(
-                                    "+ needs two numbers or two strings, not a {} and a {}",
+                                    "+ needs two numbers, two strings or two lists, not a {} and a {}",
                                     a.type_name(),
                                     b.type_name()
                                 ),
@@ -444,6 +450,65 @@ impl Vm {
                     self.close_from(self.stack.len() - 1);
                     self.pop();
                 }
+                Op::BuildList(n) => {
+                    let items = self.stack.split_off(self.stack.len() - n as usize);
+                    self.stack.push(Value::List(Rc::new(RefCell::new(items))));
+                }
+                Op::GetIndex => {
+                    let index = self.pop();
+                    let target = self.pop();
+                    let value = match &target {
+                        Value::List(items) => {
+                            let items = items.borrow();
+                            items[whole_index(&index, items.len(), "list", at)?].clone()
+                        }
+                        // By character, not byte, so "héllo"[1] is "é".
+                        Value::Str(s) => {
+                            let i = whole_index(&index, s.chars().count(), "string", at)?;
+                            Value::Str(s.chars().nth(i).expect("checked above").to_string())
+                        }
+                        other => {
+                            return Err(Fault {
+                                message: format!("a {} cannot be indexed", other.type_name()),
+                                at,
+                            });
+                        }
+                    };
+                    self.stack.push(value);
+                }
+                Op::SetIndex => {
+                    let value = self.pop();
+                    let index = self.pop();
+                    let target = self.pop();
+                    let Value::List(items) = &target else {
+                        return Err(Fault {
+                            message: format!(
+                                "only a list's items can be assigned, not a {}'s",
+                                target.type_name()
+                            ),
+                            at,
+                        });
+                    };
+                    let i = whole_index(&index, items.borrow().len(), "list", at)?;
+                    items.borrow_mut()[i] = value.clone();
+                    self.stack.push(value);
+                }
+                Op::Len => {
+                    let n = match self.pop() {
+                        Value::List(items) => items.borrow().len(),
+                        Value::Str(s) => s.chars().count(),
+                        other => {
+                            return Err(Fault {
+                                message: format!(
+                                    "for needs a list or a string, not a {}",
+                                    other.type_name()
+                                ),
+                                at,
+                            });
+                        }
+                    };
+                    self.stack.push(Value::Number(n as f64));
+                }
                 Op::GetLocal(slot) => self.stack.push(self.stack[base + slot as usize].clone()),
                 Op::SetLocal(slot) => {
                     let value = self
@@ -458,6 +523,26 @@ impl Vm {
     }
 }
 
+// An index must be a whole number inside the list; there is no negative indexing.
+fn whole_index(index: &Value, len: usize, what: &str, at: Span) -> Result<usize, Fault> {
+    let n = match index {
+        Value::Number(n) if n.fract() == 0.0 => *n,
+        other => {
+            return Err(Fault {
+                message: format!("a {what} index must be a whole number, not {other}"),
+                at,
+            });
+        }
+    };
+    if n < 0.0 || n >= len as f64 {
+        return Err(Fault {
+            message: format!("index {n} is out of range for a {what} of length {len}"),
+            at,
+        });
+    }
+    Ok(n as usize)
+}
+
 fn name_of(chunk: &Chunk, k: u16) -> String {
     match &chunk.constants[k as usize] {
         Value::Str(s) => s.clone(),
@@ -465,7 +550,7 @@ fn name_of(chunk: &Chunk, k: u16) -> String {
     }
 }
 
-const NATIVES: [Native; 2] = [
+const NATIVES: [Native; 4] = [
     Native {
         name: "print",
         arity: None,
@@ -476,7 +561,39 @@ const NATIVES: [Native; 2] = [
         arity: Some(0),
         call: native_clock,
     },
+    Native {
+        name: "len",
+        arity: Some(1),
+        call: native_len,
+    },
+    Native {
+        name: "push",
+        arity: Some(2),
+        call: native_push,
+    },
 ];
+
+fn native_len(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::List(items) => Ok(Value::Number(items.borrow().len() as f64)),
+        Value::Str(s) => Ok(Value::Number(s.chars().count() as f64)),
+        other => Err(format!(
+            "len needs a list or a string, not a {}",
+            other.type_name()
+        )),
+    }
+}
+
+// Adds to the end of the list itself, so every name for that list sees it.
+fn native_push(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::List(items) => {
+            items.borrow_mut().push(args[1].clone());
+            Ok(Value::Nil)
+        }
+        other => Err(format!("push needs a list, not a {}", other.type_name())),
+    }
+}
 
 // Prints its arguments separated by spaces, as Python does.
 fn native_print(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
