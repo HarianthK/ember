@@ -1,6 +1,7 @@
 use crate::lexer::Span;
 use crate::vm::Vm;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -17,6 +18,8 @@ pub enum Value {
     Native(Rc<Native>),
     // Shared and mutable: `let b = a` makes b the same list, as in Python.
     List(Rc<RefCell<Vec<Value>>>),
+    // String keys only, as in JSON. Kept sorted, so a map always prints the same way.
+    Map(Rc<RefCell<BTreeMap<String, Value>>>),
 }
 
 // A function written in Rust. `arity` of None takes any number of arguments.
@@ -77,6 +80,7 @@ impl PartialEq for Value {
             // Lists compare by identity, as in Lua and JavaScript; a list can contain itself,
             // and comparing contents would then never finish.
             (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
+            (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -96,6 +100,7 @@ impl Value {
             Value::Nil => "nil",
             Value::Function(_) | Value::Closure(_) | Value::Native(_) => "function",
             Value::List(_) => "list",
+            Value::Map(_) => "map",
         }
     }
 }
@@ -106,18 +111,36 @@ impl fmt::Display for Value {
     }
 }
 
-// Strings inside a list are quoted so ["1"] and [1] print differently. A list met again
-// while it is being printed is shown as [...], as Python does, instead of recursing forever.
+// Strings inside a list or map are quoted so ["1"] and [1] print differently. A list or
+// map met again while it is being printed is shown as [...] or {...}, as Python does,
+// instead of recursing forever.
 fn write_value(
     f: &mut fmt::Formatter<'_>,
     value: &Value,
-    open: &mut Vec<*const RefCell<Vec<Value>>>,
+    open: &mut Vec<*const ()>,
     quoted: bool,
 ) -> fmt::Result {
     match value {
         Value::Str(s) if quoted => write!(f, "{s:?}"),
+        Value::Map(entries) => {
+            let ptr = Rc::as_ptr(entries) as *const ();
+            if open.contains(&ptr) {
+                return write!(f, "{{...}}");
+            }
+            open.push(ptr);
+            write!(f, "{{")?;
+            for (i, (key, item)) in entries.borrow().iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{key:?}: ")?;
+                write_value(f, item, open, true)?;
+            }
+            open.pop();
+            write!(f, "}}")
+        }
         Value::List(items) => {
-            let ptr = Rc::as_ptr(items);
+            let ptr = Rc::as_ptr(items) as *const ();
             if open.contains(&ptr) {
                 return write!(f, "[...]");
             }
@@ -146,7 +169,7 @@ impl Value {
             Value::Function(func) => write!(f, "<fn {}>", func.name),
             Value::Closure(c) => write!(f, "<fn {}>", c.function.name),
             Value::Native(native) => write!(f, "<native {}>", native.name),
-            Value::List(_) => unreachable!("lists are written by write_value"),
+            Value::List(_) | Value::Map(_) => unreachable!("written by write_value"),
         }
     }
 }
@@ -190,6 +213,8 @@ pub enum Op {
     CloseUpvalue,
     // Takes that many values off the stack, in order, into a new list.
     BuildList(u16),
+    // Takes that many key and value pairs off the stack into a new map.
+    BuildMap(u16),
     GetIndex,
     SetIndex,
     // The length of the list or string on top of the stack, for `for` to count with.
@@ -256,6 +281,7 @@ impl Chunk {
                 }
                 Op::Call(argc) => format!("{:<12} {argc:>4}", "CALL"),
                 Op::BuildList(n) => format!("{:<12} {n:>4}", "BUILDLIST"),
+                Op::BuildMap(n) => format!("{:<12} {n:>4}", "BUILDMAP"),
                 Op::Closure(k) => {
                     let captures = match &self.constants[*k as usize] {
                         Value::Function(func) => func

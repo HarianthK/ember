@@ -129,7 +129,7 @@ fn list_mistakes_say_what_went_wrong() {
     assert!(err("print(5[0])").contains("a number cannot be indexed"));
     assert!(
         err("let s = \"ab\"\ns[0] = \"c\"")
-            .contains("only a list's items can be assigned, not a string's")
+            .contains("only a list's or a map's items can be assigned, not a string's")
     );
     assert!(err("for x in 5 { }").contains("for needs a list or a string, not a number"));
     assert!(err("push(1, 2)").contains("push needs a list, not a number"));

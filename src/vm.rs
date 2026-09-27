@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, Closure, Function, Native, Op, Upvalue, Value};
 use crate::lexer::Span;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
 
@@ -454,6 +454,14 @@ impl Vm {
                     let items = self.stack.split_off(self.stack.len() - n as usize);
                     self.stack.push(Value::List(Rc::new(RefCell::new(items))));
                 }
+                Op::BuildMap(n) => {
+                    let flat = self.stack.split_off(self.stack.len() - 2 * n as usize);
+                    let mut entries = BTreeMap::new();
+                    for pair in flat.chunks(2) {
+                        entries.insert(map_key(&pair[0], at)?, pair[1].clone());
+                    }
+                    self.stack.push(Value::Map(Rc::new(RefCell::new(entries))));
+                }
                 Op::GetIndex => {
                     let index = self.pop();
                     let target = self.pop();
@@ -466,6 +474,19 @@ impl Vm {
                         Value::Str(s) => {
                             let i = whole_index(&index, s.chars().count(), "string", at)?;
                             Value::Str(s.chars().nth(i).expect("checked above").to_string())
+                        }
+                        // A missing key is an error, as an undefined variable is; has() asks first.
+                        Value::Map(entries) => {
+                            let key = map_key(&index, at)?;
+                            match entries.borrow().get(&key) {
+                                Some(v) => v.clone(),
+                                None => {
+                                    return Err(Fault {
+                                        message: format!("the map has no key {key:?}"),
+                                        at,
+                                    });
+                                }
+                            }
                         }
                         other => {
                             return Err(Fault {
@@ -480,23 +501,37 @@ impl Vm {
                     let value = self.pop();
                     let index = self.pop();
                     let target = self.pop();
-                    let Value::List(items) = &target else {
-                        return Err(Fault {
-                            message: format!(
-                                "only a list's items can be assigned, not a {}'s",
-                                target.type_name()
-                            ),
-                            at,
-                        });
-                    };
-                    let i = whole_index(&index, items.borrow().len(), "list", at)?;
-                    items.borrow_mut()[i] = value.clone();
+                    match &target {
+                        Value::List(items) => {
+                            let i = whole_index(&index, items.borrow().len(), "list", at)?;
+                            items.borrow_mut()[i] = value.clone();
+                        }
+                        Value::Map(entries) => {
+                            let key = map_key(&index, at)?;
+                            entries.borrow_mut().insert(key, value.clone());
+                        }
+                        other => {
+                            return Err(Fault {
+                                message: format!(
+                                    "only a list's or a map's items can be assigned, not a {}'s",
+                                    other.type_name()
+                                ),
+                                at,
+                            });
+                        }
+                    }
                     self.stack.push(value);
                 }
                 Op::Len => {
                     let n = match self.pop() {
                         Value::List(items) => items.borrow().len(),
                         Value::Str(s) => s.chars().count(),
+                        Value::Map(_) => {
+                            return Err(Fault {
+                                message: "for needs a list or a string, not a map; loop over keys(m) instead".into(),
+                                at,
+                            });
+                        }
                         other => {
                             return Err(Fault {
                                 message: format!(
@@ -543,6 +578,16 @@ fn whole_index(index: &Value, len: usize, what: &str, at: Span) -> Result<usize,
     Ok(n as usize)
 }
 
+fn map_key(key: &Value, at: Span) -> Result<String, Fault> {
+    match key {
+        Value::Str(s) => Ok(s.clone()),
+        other => Err(Fault {
+            message: format!("map keys must be strings, not a {}", other.type_name()),
+            at,
+        }),
+    }
+}
+
 fn name_of(chunk: &Chunk, k: u16) -> String {
     match &chunk.constants[k as usize] {
         Value::Str(s) => s.clone(),
@@ -550,7 +595,7 @@ fn name_of(chunk: &Chunk, k: u16) -> String {
     }
 }
 
-const NATIVES: [Native; 4] = [
+const NATIVES: [Native; 6] = [
     Native {
         name: "print",
         arity: None,
@@ -571,14 +616,52 @@ const NATIVES: [Native; 4] = [
         arity: Some(2),
         call: native_push,
     },
+    Native {
+        name: "keys",
+        arity: Some(1),
+        call: native_keys,
+    },
+    Native {
+        name: "has",
+        arity: Some(2),
+        call: native_has,
+    },
 ];
+
+// A map's keys as a new list, in the same sorted order the map prints in.
+fn native_keys(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Map(entries) => Ok(Value::List(Rc::new(RefCell::new(
+            entries
+                .borrow()
+                .keys()
+                .map(|k| Value::Str(k.clone()))
+                .collect(),
+        )))),
+        other => Err(format!("keys needs a map, not a {}", other.type_name())),
+    }
+}
+
+fn native_has(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match (&args[0], &args[1]) {
+        (Value::Map(entries), Value::Str(key)) => {
+            Ok(Value::Bool(entries.borrow().contains_key(key)))
+        }
+        (Value::Map(_), other) => Err(format!(
+            "map keys must be strings, not a {}",
+            other.type_name()
+        )),
+        (other, _) => Err(format!("has needs a map, not a {}", other.type_name())),
+    }
+}
 
 fn native_len(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
         Value::List(items) => Ok(Value::Number(items.borrow().len() as f64)),
         Value::Str(s) => Ok(Value::Number(s.chars().count() as f64)),
+        Value::Map(entries) => Ok(Value::Number(entries.borrow().len() as f64)),
         other => Err(format!(
-            "len needs a list or a string, not a {}",
+            "len needs a list, a string or a map, not a {}",
             other.type_name()
         )),
     }

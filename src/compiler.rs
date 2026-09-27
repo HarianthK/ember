@@ -222,13 +222,6 @@ impl Compiler {
         Ok(())
     }
 
-    fn not_yet(&self, what: &str) -> CompileError {
-        CompileError {
-            message: format!("{what} is not compiled yet"),
-            at: self.at,
-        }
-    }
-
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
             Stmt::Expr(e) => {
@@ -517,11 +510,38 @@ impl Compiler {
                 self.at = *at;
                 self.emit(Op::SetIndex);
             }
-            Expr::Field { at, .. } | Expr::Assign { at, .. } => {
-                self.at = *at;
-                return Err(self.not_yet("a field"));
+            Expr::Map(pairs) => {
+                for (key, value) in pairs {
+                    self.expr(key)?;
+                    self.expr(value)?;
+                }
+                let n = u16::try_from(pairs.len()).map_err(|_| CompileError {
+                    message: "a map literal can hold at most 65535 entries".into(),
+                    at: self.at,
+                })?;
+                self.emit(Op::BuildMap(n));
             }
-            Expr::Map(_) => return Err(self.not_yet("a map")),
+            // m.name is m["name"]: the same instructions, with the name as a constant key.
+            Expr::Field { target, name, at } => {
+                self.expr(target)?;
+                self.at = *at;
+                self.constant(Value::Str(name.clone()));
+                self.emit(Op::GetIndex);
+            }
+            Expr::Assign { target, value, at } => {
+                let Expr::Field {
+                    target: map, name, ..
+                } = target.as_ref()
+                else {
+                    unreachable!("the parser only allows a name, an index or a field here");
+                };
+                self.expr(map)?;
+                self.at = *at;
+                self.constant(Value::Str(name.clone()));
+                self.expr(value)?;
+                self.at = *at;
+                self.emit(Op::SetIndex);
+            }
         }
         Ok(())
     }

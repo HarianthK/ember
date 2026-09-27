@@ -73,11 +73,6 @@ fn runtime_errors_say_what_and_where() {
 }
 
 #[test]
-fn unfinished_parts_say_so_rather_than_misbehave() {
-    assert!(err("let m = {\"a\": 1}").contains("a map is not compiled yet"));
-}
-
-#[test]
 fn bytecode_is_what_you_would_write_by_hand() {
     let script = compile(&parse("1 + 2 * 3").unwrap()).unwrap();
     let ops: Vec<String> = script
