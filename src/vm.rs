@@ -1,5 +1,6 @@
-use crate::chunk::{Chunk, Function, Native, Op, Value};
+use crate::chunk::{Chunk, Closure, Function, Native, Op, Upvalue, Value};
 use crate::lexer::Span;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
@@ -9,7 +10,7 @@ const MAX_FRAMES: usize = 10_000;
 
 // A function call in progress. `base` is where its slot 0 sits on the shared stack.
 struct Frame {
-    function: Rc<Function>,
+    closure: Rc<Closure>,
     ip: usize,
     base: usize,
 }
@@ -57,6 +58,9 @@ pub struct Vm {
     stack: Vec<Value>,
     frames: Vec<Frame>,
     globals: HashMap<String, Value>,
+    // Upvalues still pointing at a live stack slot, so a second capture of the same slot
+    // finds and shares the first rather than making a copy.
+    open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
     // What print writes, so tests can read a program's output without capturing stdout.
     pub output: Vec<String>,
     pub echo: bool,
@@ -74,6 +78,7 @@ impl Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::new(),
             globals: HashMap::new(),
+            open_upvalues: Vec::new(),
             output: Vec::new(),
             echo: false,
         };
@@ -120,13 +125,14 @@ impl Vm {
                 let line = if i + 1 == self.frames.len() {
                     fault.at.line
                 } else {
-                    frame.function.chunk.span(frame.ip - 1).line
+                    frame.closure.function.chunk.span(frame.ip - 1).line
                 };
-                trace.push((frame.function.name.clone(), line));
+                trace.push((frame.closure.function.name.clone(), line));
             }
             // Leave the machine ready for the next program, which is what a REPL will need.
             self.stack.clear();
             self.frames.clear();
+            self.open_upvalues.clear();
             RuntimeError {
                 message: fault.message,
                 at: fault.at,
@@ -135,19 +141,51 @@ impl Vm {
         })
     }
 
+    // The upvalue for an absolute stack slot, shared with any closure that already captured it.
+    fn capture(&mut self, slot: usize) -> Rc<RefCell<Upvalue>> {
+        let existing = self
+            .open_upvalues
+            .iter()
+            .find(|u| matches!(*u.borrow(), Upvalue::Open(s) if s == slot));
+        if let Some(up) = existing {
+            return Rc::clone(up);
+        }
+        let up = Rc::new(RefCell::new(Upvalue::Open(slot)));
+        self.open_upvalues.push(Rc::clone(&up));
+        up
+    }
+
+    // Slots from `from` upwards are about to disappear; every upvalue pointing at one of
+    // them takes its value off the stack and keeps it.
+    fn close_from(&mut self, from: usize) {
+        let stack = &self.stack;
+        self.open_upvalues.retain(|up| {
+            let slot = match *up.borrow() {
+                Upvalue::Open(slot) if slot >= from => slot,
+                _ => return true,
+            };
+            *up.borrow_mut() = Upvalue::Closed(stack[slot].clone());
+            false
+        });
+    }
+
     fn execute(&mut self, script: Rc<Function>) -> Result<Value, Fault> {
-        self.stack.push(Value::Function(Rc::clone(&script)));
+        let script = Rc::new(Closure {
+            function: script,
+            upvalues: Vec::new(),
+        });
+        self.stack.push(Value::Closure(Rc::clone(&script)));
         self.frames.push(Frame {
-            function: Rc::clone(&script),
+            closure: Rc::clone(&script),
             ip: 0,
             base: 0,
         });
         // The running frame's state is kept in locals and written back only on a call.
-        let mut func = script;
+        let mut closure = script;
         let mut ip = 0;
         let mut base = 0;
         loop {
-            let chunk = &func.chunk;
+            let chunk = &closure.function.chunk;
             let op = chunk.code[ip];
             let at = chunk.span(ip);
             ip += 1;
@@ -250,12 +288,14 @@ impl Vm {
                 Op::Return => {
                     let result = self.pop();
                     let finished = self.frames.pop().expect("a frame to return from");
-                    // The callee, its arguments and its locals all go at once.
+                    // The callee, its arguments and its locals all go at once, after anything
+                    // captured from them has been moved off the stack.
+                    self.close_from(finished.base);
                     self.stack.truncate(finished.base);
                     let Some(caller) = self.frames.last() else {
                         return Ok(result);
                     };
-                    func = Rc::clone(&caller.function);
+                    closure = Rc::clone(&caller.closure);
                     ip = caller.ip;
                     base = caller.base;
                     self.stack.push(result);
@@ -263,7 +303,7 @@ impl Vm {
                 Op::Call(argc) => {
                     let callee_at = self.stack.len() - 1 - argc as usize;
                     let callee = match &self.stack[callee_at] {
-                        Value::Function(f) => Rc::clone(f),
+                        Value::Closure(c) => Rc::clone(c),
                         Value::Native(native) => {
                             let native = Rc::clone(native);
                             if native.arity.is_some_and(|n| n != argc) {
@@ -291,13 +331,14 @@ impl Vm {
                             });
                         }
                     };
-                    if callee.arity != argc {
+                    let func = &callee.function;
+                    if func.arity != argc {
                         return Err(Fault {
                             message: format!(
                                 "{} takes {} argument{}, but was given {argc}",
-                                callee.name,
-                                callee.arity,
-                                if callee.arity == 1 { "" } else { "s" }
+                                func.name,
+                                func.arity,
+                                if func.arity == 1 { "" } else { "s" }
                             ),
                             at,
                         });
@@ -306,18 +347,18 @@ impl Vm {
                         return Err(Fault {
                             message: format!(
                                 "stack overflow: more than {MAX_FRAMES} calls deep, in {}",
-                                callee.name
+                                func.name
                             ),
                             at,
                         });
                     }
                     self.frames.last_mut().expect("a caller").ip = ip;
                     self.frames.push(Frame {
-                        function: Rc::clone(&callee),
+                        closure: Rc::clone(&callee),
                         ip: 0,
                         base: callee_at,
                     });
-                    func = callee;
+                    closure = callee;
                     ip = 0;
                     base = callee_at;
                 }
@@ -359,6 +400,49 @@ impl Vm {
                     if !self.stack.last().expect("a condition to test").truthy() {
                         ip = to as usize;
                     }
+                }
+                Op::Closure(k) => {
+                    let Value::Function(func) = &chunk.constants[k as usize] else {
+                        unreachable!("a closure is made from a function constant");
+                    };
+                    let func = Rc::clone(func);
+                    let upvalues = func
+                        .upvalues
+                        .iter()
+                        .map(|r| {
+                            if r.is_local {
+                                self.capture(base + r.index as usize)
+                            } else {
+                                Rc::clone(&closure.upvalues[r.index as usize])
+                            }
+                        })
+                        .collect();
+                    self.stack.push(Value::Closure(Rc::new(Closure {
+                        function: func,
+                        upvalues,
+                    })));
+                }
+                Op::GetUpvalue(i) => {
+                    let value = match &*closure.upvalues[i as usize].borrow() {
+                        Upvalue::Open(slot) => self.stack[*slot].clone(),
+                        Upvalue::Closed(v) => v.clone(),
+                    };
+                    self.stack.push(value);
+                }
+                Op::SetUpvalue(i) => {
+                    let value = self
+                        .stack
+                        .last()
+                        .expect("assignment leaves its value")
+                        .clone();
+                    match &mut *closure.upvalues[i as usize].borrow_mut() {
+                        Upvalue::Open(slot) => self.stack[*slot] = value,
+                        Upvalue::Closed(v) => *v = value,
+                    }
+                }
+                Op::CloseUpvalue => {
+                    self.close_from(self.stack.len() - 1);
+                    self.pop();
                 }
                 Op::GetLocal(slot) => self.stack.push(self.stack[base + slot as usize].clone()),
                 Op::SetLocal(slot) => {

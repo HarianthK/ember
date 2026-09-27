@@ -1,5 +1,6 @@
 use crate::lexer::Span;
 use crate::vm::Vm;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -10,7 +11,9 @@ pub enum Value {
     Str(String),
     Bool(bool),
     Nil,
+    // A compiled function as it sits in the constant table; only a closure is ever called.
     Function(Rc<Function>),
+    Closure(Rc<Closure>),
     Native(Rc<Native>),
 }
 
@@ -32,6 +35,30 @@ pub struct Function {
     pub name: String,
     pub arity: u8,
     pub chunk: Chunk,
+    // What a closure of this function captures, in order, when it is created.
+    pub upvalues: Vec<UpvalueRef>,
+}
+
+// Where to find a captured variable when the closure is made: a slot of the function
+// creating it, or one of that function's own upvalues, for variables from further out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpvalueRef {
+    pub is_local: bool,
+    pub index: u16,
+}
+
+// A captured variable. Open while its scope is alive, pointing at the stack slot; closed
+// when the scope ends, holding the value itself. Closures that share it see one variable.
+#[derive(Debug)]
+pub enum Upvalue {
+    Open(usize),
+    Closed(Value),
+}
+
+#[derive(Debug)]
+pub struct Closure {
+    pub function: Rc<Function>,
+    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
 }
 
 // Two functions are equal only if they are the same function, never by comparing code.
@@ -43,6 +70,7 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            (Value::Closure(a), Value::Closure(b)) => Rc::ptr_eq(a, b),
             (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
@@ -61,7 +89,7 @@ impl Value {
             Value::Str(_) => "string",
             Value::Bool(_) => "boolean",
             Value::Nil => "nil",
-            Value::Function(_) | Value::Native(_) => "function",
+            Value::Function(_) | Value::Closure(_) | Value::Native(_) => "function",
         }
     }
 }
@@ -74,6 +102,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Nil => write!(f, "nil"),
             Value::Function(func) => write!(f, "<fn {}>", func.name),
+            Value::Closure(c) => write!(f, "<fn {}>", c.function.name),
             Value::Native(native) => write!(f, "<native {}>", native.name),
         }
     }
@@ -110,6 +139,12 @@ pub enum Op {
     SetLocal(u16),
     // The operand is the argument count; the function sits on the stack just below the arguments.
     Call(u8),
+    // Makes a closure from the function constant, capturing what its UpvalueRefs name.
+    Closure(u16),
+    GetUpvalue(u16),
+    SetUpvalue(u16),
+    // Ends a local that a closure captured: its value moves off the stack into the upvalue.
+    CloseUpvalue,
     // Jumps name the instruction to go to, not a distance, so one op serves both directions.
     Jump(u16),
     // Leaves the condition on the stack; the code on each side pops it.
@@ -171,6 +206,32 @@ impl Chunk {
                     format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
                 }
                 Op::Call(argc) => format!("{:<12} {argc:>4}", "CALL"),
+                Op::Closure(k) => {
+                    let captures = match &self.constants[*k as usize] {
+                        Value::Function(func) => func
+                            .upvalues
+                            .iter()
+                            .map(|u| {
+                                format!(
+                                    "{} {}",
+                                    if u.is_local { "local" } else { "upvalue" },
+                                    u.index
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        _ => String::new(),
+                    };
+                    format!(
+                        "{:<12} {k:>4} ({}) [{captures}]",
+                        "CLOSURE", self.constants[*k as usize]
+                    )
+                }
+                Op::GetUpvalue(i) | Op::SetUpvalue(i) => {
+                    let name = format!("{op:?}");
+                    let name = name[..name.find('(').unwrap()].to_uppercase();
+                    format!("{name:<12} {i:>4}")
+                }
                 Op::Jump(to) | Op::JumpIfFalse(to) => {
                     let name = format!("{op:?}");
                     let name = name[..name.find('(').unwrap()].to_uppercase();

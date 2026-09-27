@@ -1,5 +1,5 @@
 use crate::ast::{BinOp, Expr, Stmt, UnOp};
-use crate::chunk::{Chunk, Function, Op, Value};
+use crate::chunk::{Chunk, Function, Op, UpvalueRef, Value};
 use crate::lexer::Span;
 use std::fmt;
 use std::rc::Rc;
@@ -19,78 +19,115 @@ impl fmt::Display for CompileError {
 struct Local {
     name: String,
     depth: usize,
+    // A captured local cannot just be popped when its block ends; it has to be closed.
+    captured: bool,
 }
 
-// One of these per function being compiled; a nested function gets a fresh one.
-pub struct Compiler {
+// One per function being compiled. They form a stack, innermost last, so resolving a
+// name can look outwards through every function the code is nested in.
+struct FnState {
     chunk: Chunk,
-    // The span of the statement being compiled, for expressions that carry none of their own.
-    at: Span,
     // Locals in declaration order; a local's index here is its stack slot at run time.
     locals: Vec<Local>,
     depth: usize,
     is_script: bool,
-    // Locals of the functions around this one, which it cannot reach until closures exist.
-    enclosing: Vec<String>,
+    upvalues: Vec<UpvalueRef>,
 }
 
-impl Compiler {
-    fn new(own_name: &str, is_script: bool, enclosing: Vec<String>, at: Span) -> Self {
-        Compiler {
+impl FnState {
+    fn new(own_name: &str, is_script: bool) -> Self {
+        FnState {
             chunk: Chunk::new(),
-            at,
             // Slot 0 holds the function being run. Naming it after the function is what
-            // lets a function call itself before closures can capture anything.
+            // lets a function call itself by name without capturing anything.
             locals: vec![Local {
                 name: own_name.to_string(),
                 depth: 0,
+                captured: false,
             }],
             depth: 0,
             is_script,
-            enclosing,
+            upvalues: Vec::new(),
         }
     }
 
-    fn emit(&mut self, op: Op) {
-        let at = self.at;
-        self.chunk.push(op, at);
-    }
-
-    fn name_constant(&mut self, name: &str) -> u16 {
-        self.chunk.constant(Value::Str(name.to_string()))
-    }
-
     // Searched from the end, so an inner declaration shadows an outer one of the same name.
-    fn resolve(&self, name: &str) -> Option<u16> {
+    fn resolve_local(&self, name: &str) -> Option<u16> {
         self.locals
             .iter()
             .rposition(|l| l.name == name)
             .map(|i| i as u16)
     }
+}
 
-    fn check_reachable(&self, name: &str) -> Result<(), CompileError> {
-        // Without this, the name would quietly fall through to a global of the same name.
-        if self.enclosing.iter().any(|n| n == name) {
-            return Err(CompileError {
-                message: format!(
-                    "{name} belongs to an enclosing function; capturing it needs closures, which come in phase 3"
-                ),
-                at: self.at,
-            });
+pub struct Compiler {
+    states: Vec<FnState>,
+    // The span of the statement being compiled, for expressions that carry none of their own.
+    at: Span,
+}
+
+impl Compiler {
+    fn st(&mut self) -> &mut FnState {
+        self.states.last_mut().expect("a function being compiled")
+    }
+
+    fn st_ref(&self) -> &FnState {
+        self.states.last().expect("a function being compiled")
+    }
+
+    fn emit(&mut self, op: Op) {
+        let at = self.at;
+        self.st().chunk.push(op, at);
+    }
+
+    fn name_constant(&mut self, name: &str) -> u16 {
+        self.st().chunk.constant(Value::Str(name.to_string()))
+    }
+
+    // A name that is not a local of the function at `level` may be a local of a function
+    // around it. Each function in between gets an upvalue, so the capture is passed inwards
+    // one level at a time, and every closure only ever looks one level out.
+    fn resolve_upvalue(&mut self, level: usize, name: &str) -> Option<u16> {
+        if level == 0 {
+            return None;
         }
-        Ok(())
+        let outer = level - 1;
+        if let Some(slot) = self.states[outer].resolve_local(name) {
+            self.states[outer].locals[slot as usize].captured = true;
+            return Some(self.add_upvalue(level, true, slot));
+        }
+        let index = self.resolve_upvalue(outer, name)?;
+        Some(self.add_upvalue(level, false, index))
+    }
+
+    fn add_upvalue(&mut self, level: usize, is_local: bool, index: u16) -> u16 {
+        let wanted = UpvalueRef { is_local, index };
+        let upvalues = &mut self.states[level].upvalues;
+        // Using a captured name twice must not capture it twice.
+        if let Some(i) = upvalues.iter().position(|u| *u == wanted) {
+            return i as u16;
+        }
+        upvalues.push(wanted);
+        (upvalues.len() - 1) as u16
     }
 
     fn block(&mut self, body: &[Stmt]) -> Result<(), CompileError> {
-        self.depth += 1;
+        self.st().depth += 1;
         for stmt in body {
             self.stmt(stmt)?;
         }
-        self.depth -= 1;
+        self.st().depth -= 1;
         // The block's locals are still on the stack; take them off as the scope ends.
-        while self.locals.last().is_some_and(|l| l.depth > self.depth) {
-            self.locals.pop();
-            self.emit(Op::Pop);
+        loop {
+            let depth = self.st_ref().depth;
+            let Some(local) = self.st().locals.pop_if(|l| l.depth > depth) else {
+                break;
+            };
+            self.emit(if local.captured {
+                Op::CloseUpvalue
+            } else {
+                Op::Pop
+            });
         }
         Ok(())
     }
@@ -98,11 +135,11 @@ impl Compiler {
     // Emits a jump whose target is not known yet; patch() fills it in once it is.
     fn jump(&mut self, make: fn(u16) -> Op) -> usize {
         self.emit(make(u16::MAX));
-        self.chunk.code.len() - 1
+        self.st_ref().chunk.code.len() - 1
     }
 
     fn here(&self) -> Result<u16, CompileError> {
-        u16::try_from(self.chunk.code.len()).map_err(|_| CompileError {
+        u16::try_from(self.st_ref().chunk.code.len()).map_err(|_| CompileError {
             message: "this program is too long to jump across; the limit is 65535 instructions"
                 .into(),
             at: self.at,
@@ -111,7 +148,8 @@ impl Compiler {
 
     fn patch(&mut self, at: usize) -> Result<(), CompileError> {
         let to = self.here()?;
-        self.chunk.code[at] = match self.chunk.code[at] {
+        let code = &mut self.st().chunk.code;
+        code[at] = match code[at] {
             Op::Jump(_) => Op::Jump(to),
             Op::JumpIfFalse(_) => Op::JumpIfFalse(to),
             other => unreachable!("patched a {other:?}, which is not a jump"),
@@ -138,14 +176,16 @@ impl Compiler {
                 // The value is compiled before the name exists, so `let x = x` reads the outer x.
                 self.expr(value)?;
                 self.at = *at;
-                if self.depth == 0 {
+                let depth = self.st_ref().depth;
+                if depth == 0 {
                     let k = self.name_constant(name);
                     self.emit(Op::DefineGlobal(k));
                 } else {
                     if self
+                        .st_ref()
                         .locals
                         .iter()
-                        .any(|l| l.depth == self.depth && &l.name == name)
+                        .any(|l| l.depth == depth && &l.name == name)
                     {
                         return Err(CompileError {
                             message: format!("{name} is already declared in this block"),
@@ -153,15 +193,16 @@ impl Compiler {
                         });
                     }
                     // No instruction: the value just computed is already sitting in the local's slot.
-                    self.locals.push(Local {
+                    self.st().locals.push(Local {
                         name: name.clone(),
-                        depth: self.depth,
+                        depth,
+                        captured: false,
                     });
                 }
             }
             Stmt::Return { value, at } => {
                 self.at = *at;
-                if self.is_script {
+                if self.st_ref().is_script {
                     return Err(CompileError {
                         message: "return is only allowed inside a function".into(),
                         at: *at,
@@ -223,32 +264,32 @@ impl Compiler {
             ),
             at,
         })?;
-        // Every declared local here is out of reach for the function inside it. Slot 0 is left
-        // out: a named function is usually a global too, and inner code may call it by that name.
-        let mut enclosing = self.enclosing.clone();
-        enclosing.extend(self.locals.iter().skip(1).map(|l| l.name.clone()));
-        let mut inner = Compiler::new(&own_name, false, enclosing, at);
+        let mut state = FnState::new(&own_name, false);
         // Parameters are the first locals, in the slots the caller's arguments already occupy.
-        inner.depth = 1;
+        state.depth = 1;
         for param in params {
-            if inner.locals.iter().skip(1).any(|l| &l.name == param) {
+            if state.locals.iter().skip(1).any(|l| &l.name == param) {
                 return Err(CompileError {
                     message: format!("the parameter {param} is repeated"),
                     at,
                 });
             }
-            inner.locals.push(Local {
+            state.locals.push(Local {
                 name: param.clone(),
                 depth: 1,
+                captured: false,
             });
         }
+        self.states.push(state);
         // The body runs at the parameters' depth, so `let a` in it cannot silently hide parameter a.
         for stmt in body {
-            inner.stmt(stmt)?;
+            self.stmt(stmt)?;
         }
-        // Falling off the end returns nil. The frame's locals go with the frame, so nothing is popped.
-        inner.emit(Op::Nil);
-        inner.emit(Op::Return);
+        // Falling off the end returns nil. Return closes whatever the frame's locals had
+        // captured, so nothing is popped or closed here.
+        self.emit(Op::Nil);
+        self.emit(Op::Return);
+        let state = self.states.pop().expect("the state pushed above");
         let func = Function {
             name: if own_name.is_empty() {
                 "anonymous".into()
@@ -256,22 +297,48 @@ impl Compiler {
                 own_name
             },
             arity,
-            chunk: inner.chunk,
+            chunk: state.chunk,
+            upvalues: state.upvalues,
         };
-        let k = self.chunk.constant(Value::Function(Rc::new(func)));
+        let k = self.st().chunk.constant(Value::Function(Rc::new(func)));
         self.at = at;
-        self.emit(Op::Constant(k));
+        self.emit(Op::Closure(k));
         Ok(())
+    }
+
+    // Where a name lives, from nearest to furthest: this function, an enclosing one, global.
+    fn variable(&mut self, name: &str, set: bool) {
+        let level = self.states.len() - 1;
+        if let Some(slot) = self.st_ref().resolve_local(name) {
+            self.emit(if set {
+                Op::SetLocal(slot)
+            } else {
+                Op::GetLocal(slot)
+            });
+        } else if let Some(i) = self.resolve_upvalue(level, name) {
+            self.emit(if set {
+                Op::SetUpvalue(i)
+            } else {
+                Op::GetUpvalue(i)
+            });
+        } else {
+            let k = self.name_constant(name);
+            self.emit(if set {
+                Op::SetGlobal(k)
+            } else {
+                Op::GetGlobal(k)
+            });
+        }
     }
 
     fn expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
             Expr::Number(n) => {
-                let k = self.chunk.constant(Value::Number(*n));
+                let k = self.st().chunk.constant(Value::Number(*n));
                 self.emit(Op::Constant(k));
             }
             Expr::Str(s) => {
-                let k = self.chunk.constant(Value::Str(s.clone()));
+                let k = self.st().chunk.constant(Value::Str(s.clone()));
                 self.emit(Op::Constant(k));
             }
             Expr::Bool(true) => self.emit(Op::True),
@@ -327,14 +394,7 @@ impl Compiler {
             }
             Expr::Name(name, at) => {
                 self.at = *at;
-                match self.resolve(name) {
-                    Some(slot) => self.emit(Op::GetLocal(slot)),
-                    None => {
-                        self.check_reachable(name)?;
-                        let k = self.name_constant(name);
-                        self.emit(Op::GetGlobal(k));
-                    }
-                }
+                self.variable(name, false);
             }
             Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Name(..)) => {
                 let Expr::Name(name, _) = target.as_ref() else {
@@ -343,14 +403,7 @@ impl Compiler {
                 self.expr(value)?;
                 self.at = *at;
                 // Assignment is an expression, so the value stays on the stack after it is stored.
-                match self.resolve(name) {
-                    Some(slot) => self.emit(Op::SetLocal(slot)),
-                    None => {
-                        self.check_reachable(name)?;
-                        let k = self.name_constant(name);
-                        self.emit(Op::SetGlobal(k));
-                    }
-                }
+                self.variable(name, true);
             }
             Expr::Call { callee, args, at } => {
                 // The function first, then its arguments above it, which become its first locals.
@@ -384,15 +437,20 @@ impl Compiler {
 
 // The whole program compiles to a function of no arguments, which the VM calls to start.
 pub fn compile(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
-    let mut c = Compiler::new("", true, Vec::new(), Span { line: 1, col: 1 });
+    let mut c = Compiler {
+        states: vec![FnState::new("", true)],
+        at: Span { line: 1, col: 1 },
+    };
     for stmt in program {
         c.stmt(stmt)?;
     }
     c.emit(Op::Nil);
     c.emit(Op::Return);
+    let state = c.states.pop().expect("the script's state");
     Ok(Rc::new(Function {
         name: "script".into(),
         arity: 0,
-        chunk: c.chunk,
+        chunk: state.chunk,
+        upvalues: Vec::new(),
     }))
 }

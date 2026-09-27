@@ -122,12 +122,6 @@ fn compile_time_mistakes_are_caught() {
     assert!(err("return 1").contains("return is only allowed inside a function"));
     assert!(err("fn f(a, a) {}").contains("the parameter a is repeated"));
     assert!(err("fn f(a) { let a = 2 }").contains("a is already declared"));
-    // Reaching into the enclosing function needs closures. Without the check this would
-    // quietly read the global x and print "global".
-    let e = err(
-        "let x = \"global\"\nfn outer() {\n  let x = \"local\"\n  fn inner() { return x }\n  return inner()\n}\nprint(outer())",
-    );
-    assert!(e.contains("x belongs to an enclosing function"), "{e}");
 }
 
 #[test]
