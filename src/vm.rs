@@ -407,13 +407,12 @@ impl Vm {
                     base = callee_at;
                 }
                 Op::DefineGlobal(k) => {
-                    let name = name_of(chunk, k);
                     let value = self.pop();
-                    self.globals.insert(name, value);
+                    self.globals.insert(name_of(chunk, k).to_string(), value);
                 }
                 Op::GetGlobal(k) => {
                     let name = name_of(chunk, k);
-                    match self.globals.get(&name) {
+                    match self.globals.get(name) {
                         Some(v) => self.stack.push(v.clone()),
                         None => {
                             return Err(Fault {
@@ -425,19 +424,23 @@ impl Vm {
                 }
                 Op::SetGlobal(k) => {
                     let name = name_of(chunk, k);
-                    // Assigning never creates a variable, so a typo is an error rather than a new global.
-                    if !self.globals.contains_key(&name) {
-                        return Err(Fault {
-                            message: format!("{name} is not defined; declare it with let first"),
-                            at,
-                        });
-                    }
                     let value = self
                         .stack
                         .last()
                         .expect("assignment leaves its value")
                         .clone();
-                    self.globals.insert(name, value);
+                    // Assigning never creates a variable, so a typo is an error rather than a new global.
+                    match self.globals.get_mut(name) {
+                        Some(slot) => *slot = value,
+                        None => {
+                            return Err(Fault {
+                                message: format!(
+                                    "{name} is not defined; declare it with let first"
+                                ),
+                                at,
+                            });
+                        }
+                    }
                 }
                 Op::Jump(to) => ip = to as usize,
                 Op::JumpIfFalse(to) => {
@@ -631,9 +634,11 @@ fn map_key(key: &Value, at: Span) -> Result<String, Fault> {
     }
 }
 
-fn name_of(chunk: &Chunk, k: u16) -> String {
+// Borrowed, not cloned: a copy of the name on every global read and write was the single
+// biggest cost in a loop at the top level.
+fn name_of(chunk: &Chunk, k: u16) -> &str {
     match &chunk.constants[k as usize] {
-        Value::Str(s) => s.clone(),
+        Value::Str(s) => s,
         other => unreachable!("a global's name constant is a string, not {other}"),
     }
 }
