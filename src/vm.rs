@@ -638,7 +638,7 @@ fn name_of(chunk: &Chunk, k: u16) -> String {
     }
 }
 
-const NATIVES: [Native; 6] = [
+const NATIVES: [Native; 13] = [
     Native {
         name: "print",
         arity: None,
@@ -669,7 +669,146 @@ const NATIVES: [Native; 6] = [
         arity: Some(2),
         call: native_has,
     },
+    Native {
+        name: "str",
+        arity: Some(1),
+        call: native_str,
+    },
+    Native {
+        name: "num",
+        arity: Some(1),
+        call: native_num,
+    },
+    Native {
+        name: "range",
+        arity: None,
+        call: native_range,
+    },
+    Native {
+        name: "pop",
+        arity: Some(1),
+        call: native_pop,
+    },
+    Native {
+        name: "join",
+        arity: Some(2),
+        call: native_join,
+    },
+    Native {
+        name: "split",
+        arity: Some(2),
+        call: native_split,
+    },
+    Native {
+        name: "floor",
+        arity: Some(1),
+        call: native_floor,
+    },
 ];
+
+// Any value as text, exactly as print would show it.
+fn native_str(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    Ok(Value::Str(vm.heap.show(&args[0])))
+}
+
+fn native_num(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Number(n) => Ok(Value::Number(*n)),
+        Value::Str(s) => s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite())
+            .map(Value::Number)
+            .ok_or_else(|| format!("num could not read {s:?} as a number")),
+        other => Err(format!("num needs a string, not a {}", other.type_name())),
+    }
+}
+
+// range(n) is 0 up to n; range(a, b) is a up to b. The end is never included, as in Python.
+fn native_range(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let whole = |v: &Value| match v {
+        Value::Number(n) if n.fract() == 0.0 => Ok(*n as i64),
+        other => Err(format!(
+            "range needs whole numbers, not {}",
+            vm.heap.show(other)
+        )),
+    };
+    let (from, to) = match args {
+        [end] => (0, whole(end)?),
+        [start, end] => (whole(start)?, whole(end)?),
+        _ => {
+            return Err(format!(
+                "range takes 1 or 2 arguments, but was given {}",
+                args.len()
+            ));
+        }
+    };
+    let items = (from..to.max(from))
+        .map(|i| Value::Number(i as f64))
+        .collect();
+    Ok(vm.new_list(items))
+}
+
+// Takes the last item off the list itself and returns it, so a list works as a stack.
+fn native_pop(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::List(r) => vm
+            .heap
+            .list_mut(*r)
+            .pop()
+            .ok_or_else(|| "pop needs a list with something in it".to_string()),
+        other => Err(format!("pop needs a list, not a {}", other.type_name())),
+    }
+}
+
+// Items are shown as print shows them, so a list of numbers joins without converting first.
+fn native_join(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match (&args[0], &args[1]) {
+        (Value::List(r), Value::Str(sep)) => Ok(Value::Str(
+            vm.heap
+                .list(*r)
+                .iter()
+                .map(|v| vm.heap.show(v))
+                .collect::<Vec<_>>()
+                .join(sep),
+        )),
+        (Value::List(_), other) => Err(format!(
+            "join needs a string to put between items, not a {}",
+            other.type_name()
+        )),
+        (other, _) => Err(format!("join needs a list, not a {}", other.type_name())),
+    }
+}
+
+// An empty separator splits into characters.
+fn native_split(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match (&args[0], &args[1]) {
+        (Value::Str(s), Value::Str(sep)) => {
+            let parts: Vec<Value> = if sep.is_empty() {
+                s.chars().map(|c| Value::Str(c.to_string())).collect()
+            } else {
+                s.split(sep.as_str())
+                    .map(|p| Value::Str(p.to_string()))
+                    .collect()
+            };
+            Ok(vm.new_list(parts))
+        }
+        (Value::Str(_), other) => Err(format!(
+            "split needs a string to split on, not a {}",
+            other.type_name()
+        )),
+        (other, _) => Err(format!("split needs a string, not a {}", other.type_name())),
+    }
+}
+
+// Every number is a float, so whole-number division is floor(a / b).
+fn native_floor(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Number(n) => Ok(Value::Number(n.floor())),
+        other => Err(format!("floor needs a number, not a {}", other.type_name())),
+    }
+}
 
 // A map's keys as a new list, in the same sorted order the map prints in.
 fn native_keys(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
