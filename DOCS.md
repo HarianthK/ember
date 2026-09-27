@@ -265,3 +265,63 @@ a list pushed into itself, and an account map holding a closure that captured
 the map. Both work, and both leak. That is the concrete reason for phase 4: a
 collector that traces what is reachable from the stack and the globals frees a
 cycle that nothing can reach, where counting never will.
+
+## Phase 4: the garbage collector
+
+### Handles instead of pointers
+
+Lists, maps, closures and upvalues moved out of `Rc` into a heap the VM owns: a
+vector of slots, with a value holding a small copyable handle, the slot number.
+Identity is the handle, so `==` on lists is a comparison of two integers. A freed
+slot is emptied, and reading it panics with "a handle to an object that was
+freed", so a collector bug fails loudly instead of reading whatever took the slot.
+
+### Collecting only between instructions
+
+The standard bug in a collector is freeing something that is still in use but
+only held in a local variable of the interpreter itself, where marking cannot see
+it: the joined contents of `a + b` just before the new list is allocated, for
+instance. Clox handles this by pushing such temporaries onto the stack by hand
+wherever it allocates. Here the collector never runs in the middle of an
+instruction, only at the top of the loop, between one instruction and the next.
+At that point nothing is half built, every live value is on the stack, in a
+global, or in an open upvalue, and those three are the whole root set. The price
+is that an instruction which allocates a great deal cannot collect partway
+through, which no instruction here does.
+
+Marking uses a list of objects still to look inside rather than recursion, so a
+list nested a million deep cannot overflow the Rust stack. A collection starts
+once 1,024 objects are alive, and after each one the threshold becomes twice what
+survived, so a program with a large working set is not collected constantly.
+A loop that makes 200,000 temporary lists runs in fewer than 5,000 slots.
+
+### Stress mode, and a count that lied
+
+`EMBER_STRESS_GC=1` makes the heap collect before every instruction that follows
+an allocation, and stop reusing freed slots, so every handle freed by mistake is
+used after being freed within an instruction or two. The whole suite then runs
+again as a collector test.
+
+To see whether that was worth anything, I broke the collector one rule at a
+time and counted failing tests in each mode. The first count said stress mode
+added almost nothing. That was wrong: `cargo test` stops at the first test file
+that fails, so every file after it never ran and the counts were cut short.
+With `--no-fail-fast` the real numbers were: leaving list items untraced fails 2
+tests normally and 7 under stress, map values 2 and 5, closure upvalues 2 and 8.
+
+### Measuring each rule found two holes and one needless root
+
+The same count, done for every tracing rule and every root, turned up three
+things. Untracing a closed upvalue failed nothing in either mode: no test had a
+heap object reachable only through a closure whose function had returned. Taking
+the open-upvalue list out of the roots failed nothing either: no test dropped a
+closure while the variable it captured was still in scope, which leaves the list
+as the only holder of the upvalue until the scope ends and closes it. Each now
+has a test that fails without the rule, and both failures are the freed-handle
+panic.
+
+The third was the running frames, which I had listed as a root. Removing them
+changed nothing, and cannot: a frame's closure always sits in its slot 0 on the
+stack, which is a root already. A root that no program can make matter only hides
+the assumption it depends on, so it is gone, and the assumption is written where
+the roots are.

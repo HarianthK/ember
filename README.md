@@ -32,9 +32,10 @@ person.name = "Ada";
       recursion, natives written in Rust, and errors that show the call stack.
 - [x] **Phase 3, closures and objects.** Closures that capture variables and
       share them, lists, maps with fields, and `for` loops over lists and
-      strings. Values are reference counted for now, which leaks cycles.
-- [ ] **Phase 4, the garbage collector.** Mark and sweep over an arena the VM
-      owns, with the roots taken from the stack and the call frames.
+      strings.
+- [x] **Phase 4, the garbage collector.** Objects live in a heap the VM owns
+      and are freed by mark and sweep, including the cycles that reference
+      counting leaked. A stress mode collects before every instruction.
 - [ ] **Phase 5, the finish.** A REPL, a small standard library, error traces
       with line numbers, and benchmarks against a tree-walker.
 
@@ -44,6 +45,7 @@ person.name = "Ada";
     cargo run -- examples/counter.em --dis      # shows the bytecode
     cargo run -- examples/tour.em --parse       # shows how the parser read it
     cargo test
+    EMBER_STRESS_GC=1 cargo test                # the same, collecting constantly
 
 The disassembly is a listing with the source line beside each instruction.
 Here `make_counter` returns a closure over its local `n`: `[local 1]` is the
@@ -76,8 +78,10 @@ Built in: `print`, `len`, `push`, `keys`, `has` and `clock`.
 
 ## Checking it
 
-81 tests, one file per part of the language: parsing, the chunk, running
-expressions, calls, closures, lists and maps. Programs are run and their printed
+87 tests, one file per part of the language: parsing, the chunk, running
+expressions, calls, closures, lists, maps and the collector. They all pass a
+second time in stress mode, where the heap collects before every instruction
+that follows an allocation, which is how collector bugs get found. Programs are run and their printed
 output compared, and after every long program the stack must be empty, because
 a value left behind on the stack changes nothing a program prints.
 
