@@ -90,6 +90,9 @@ impl Vm {
             vm.globals
                 .insert(native.name.to_string(), Value::Native(Rc::new(native)));
         }
+        // EMBER_STRESS_GC=1 cargo test runs every test with a collection before every
+        // instruction that follows an allocation.
+        vm.heap.stress = std::env::var_os("EMBER_STRESS_GC").is_some();
         vm
     }
 
@@ -176,8 +179,9 @@ impl Vm {
     }
 
     // Runs only between instructions. By then every live value is on the stack, in a
-    // global, in a frame or in an open upvalue, so those four are all the roots there are;
-    // no half-built value can be sitting in a Rust variable where marking cannot see it.
+    // global or in an open upvalue, so those are all the roots there are; no half-built
+    // value can be sitting in a Rust variable where marking cannot see it. A running
+    // frame's closure needs no root of its own: it sits in the frame's slot 0 on the stack.
     pub fn collect(&mut self) {
         let mut roots: Vec<Ref> = Vec::new();
         let handle = |v: &Value| match v {
@@ -186,7 +190,6 @@ impl Vm {
         };
         roots.extend(self.stack.iter().filter_map(handle));
         roots.extend(self.globals.values().filter_map(handle));
-        roots.extend(self.frames.iter().map(|f| f.closure));
         roots.extend(self.open_upvalues.iter().copied());
         self.heap.mark(roots);
         self.heap.sweep();

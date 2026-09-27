@@ -66,11 +66,11 @@ impl Default for Heap {
 impl Heap {
     pub fn alloc(&mut self, obj: Obj) -> Ref {
         self.allocated_since_collection += 1;
-        if !self.stress {
-            if let Some(i) = self.free.pop() {
-                self.slots[i as usize] = Some(obj);
-                return Ref(i);
-            }
+        if !self.stress
+            && let Some(i) = self.free.pop()
+        {
+            self.slots[i as usize] = Some(obj);
+            return Ref(i);
         }
         self.slots.push(Some(obj));
         self.marks.push(false);
