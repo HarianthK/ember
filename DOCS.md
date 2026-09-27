@@ -190,3 +190,78 @@ the outer `run` builds the trace from the frames still on the stack, then
 empties the machine so it can run the next program. Runaway recursion is ten
 thousand identical frames, so the display collapses repeats into one line, as
 Python does.
+
+## Phase 3: closures and objects
+
+### An upvalue is a pointer that becomes a box
+
+A closure needs to keep variables that belong to a function which may already
+have returned. The design here is Lua's. While the variable's scope is alive,
+the closure's upvalue is open: it holds the stack slot and reads and writes
+there, so the enclosing function and the closure see one variable. When the
+scope ends, by a block closing or the function returning, the upvalue is
+closed: the value moves off the stack into the upvalue itself. The closure
+never notices the difference; every read goes through the upvalue either way.
+
+Two closures that capture the same variable must share it, so the VM keeps a
+list of open upvalues and reuses one if the slot already has it. The compiler
+marks every captured local, and a block ending emits `CLOSEUPVALUE` for those
+instead of `POP`. Each pass of a loop body is its own scope, so a closure made
+inside a loop captures that pass's variable rather than a single one that
+every closure would then share.
+
+A variable two functions out reaches the innermost through the one in between:
+the middle function captures it too, even if it never mentions it, and the
+inner one captures the middle's upvalue. Each closure only ever looks one level
+out, which is what keeps creation cheap.
+
+### The test that could not fail
+
+The first test for sharing called a setter while the function that owned the
+variable was still running, and then read it back through a getter. Deliberately
+breaking the VM so that every capture made a new upvalue did not fail it: while
+the variable is still on the stack, two separate upvalues both point at the same
+slot and agree. Sharing only shows after the scope has ended, when each separate
+copy would hold its own value. The test now writes through one closure after the
+owner has returned, and it is the only test that catches that break.
+
+### for is a while loop with two hidden locals
+
+`for x in xs` compiles to a counting loop: the list and a counter are kept in
+two locals whose names start with a space. No name in a program can start with
+a space, so the loop cannot be read or disturbed by the code inside it. The
+length is read on every pass, so pushing to the list inside the loop extends
+it, as in Python.
+
+### Lists and maps are shared, and compared by identity
+
+`let b = a` makes `b` the same list, and `push` changes it for every name that
+holds it, as in Python. Equality is identity, as in Lua and JavaScript, because
+a list can contain itself: `push(xs, xs)` is legal, and comparing contents would
+never finish. The same cycle would make printing recurse forever, so printing
+keeps track of what it is inside and shows `[...]`, as Python does.
+
+Maps take string keys only, as JSON does, which avoids deciding what it means to
+hash a float. They are a `BTreeMap`, so they always print in key order and test
+output never depends on hash order. A missing key is an error, the same as an
+undefined variable, and `has(m, k)` asks first. `m.name` is `m["name"]`: fields
+compile to the same instructions as indexing with a constant key.
+
+### The bug the é test found
+
+A test that indexed `"héllo"` expected `é` and got `Ã`. The lexer reads the
+source as bytes, and it had turned each byte of a string into a character on its
+own. `é` is two bytes in UTF-8, so every string with an accent, a non-Latin
+script or an emoji had been silently corrupted since phase 1, and `len("héllo")`
+was 6. No test had used anything but ASCII. The lexer now collects a string's
+bytes and decodes them once, and it no longer counts continuation bytes as
+columns, so an error after an `é` points at the right place.
+
+### Reference counting leaks cycles
+
+Every heap value is an `Rc` for now, which frees a value when the last reference
+to it goes. A cycle never reaches zero. Two of the tests build one on purpose:
+a list pushed into itself, and an account map holding a closure that captured
+the map. Both work, and both leak. That is the concrete reason for phase 4: a
+collector that traces what is reachable from the stack and the globals frees a
+cycle that nothing can reach, where counting never will.
