@@ -549,14 +549,30 @@ impl Compiler {
 
 // The whole program compiles to a function of no arguments, which the VM calls to start.
 pub fn compile(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+    compile_script(program, false)
+}
+
+// For the REPL: a line ending in a bare expression returns its value instead of dropping it.
+pub fn compile_repl(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+    compile_script(program, true)
+}
+
+fn compile_script(program: &[Stmt], keep_last: bool) -> Result<Rc<Function>, CompileError> {
     let mut c = Compiler {
         states: vec![FnState::new("", true)],
         at: Span { line: 1, col: 1 },
     };
-    for stmt in program {
+    let (last, rest) = match program.split_last() {
+        Some((Stmt::Expr(e), rest)) if keep_last => (Some(e), rest),
+        _ => (None, program),
+    };
+    for stmt in rest {
         c.stmt(stmt)?;
     }
-    c.emit(Op::Nil);
+    match last {
+        Some(e) => c.expr(e)?,
+        None => c.emit(Op::Nil),
+    }
     c.emit(Op::Return);
     let state = c.states.pop().expect("the script's state");
     Ok(Rc::new(Function {

@@ -204,6 +204,13 @@ impl Heap {
         out
     }
 
+    // A value as the REPL echoes it: strings quoted even on their own, so "1" and 1 differ.
+    pub fn repr(&self, value: &Value) -> String {
+        let mut out = String::new();
+        self.write(&mut out, value, &mut Vec::new(), true);
+        out
+    }
+
     fn write(&self, out: &mut String, value: &Value, open: &mut Vec<Ref>, quoted: bool) {
         match value {
             Value::Str(s) if quoted => out.push_str(&format!("{s:?}")),
