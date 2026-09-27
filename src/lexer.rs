@@ -164,7 +164,8 @@ impl<'a> Lexer<'a> {
         if c == b'\n' {
             self.line += 1;
             self.col = 1;
-        } else {
+        } else if c & 0xC0 != 0x80 {
+            // Continuation bytes of a multi-byte character do not start a new column.
             self.col += 1;
         }
         c
@@ -215,7 +216,9 @@ impl<'a> Lexer<'a> {
     fn string(&mut self) -> Result<Token, LexError> {
         let at = self.here();
         self.bump(); // opening quote
-        let mut out = String::new();
+        // Bytes, decoded once at the end: a character such as é is two bytes in the source,
+        // and turning each byte into a character on its own produced "Ã©".
+        let mut out = Vec::new();
         loop {
             match self.peek() {
                 0 => {
@@ -226,8 +229,10 @@ impl<'a> Lexer<'a> {
                 }
                 b'"' => {
                     self.bump();
+                    let text = String::from_utf8(out)
+                        .expect("the source is UTF-8 and every escape is ASCII");
                     return Ok(Token {
-                        tok: Tok::Str(out),
+                        tok: Tok::Str(text),
                         at,
                     });
                 }
@@ -235,11 +240,11 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     let escape = self.bump();
                     out.push(match escape {
-                        b'n' => '\n',
-                        b't' => '\t',
-                        b'r' => '\r',
-                        b'\\' => '\\',
-                        b'"' => '"',
+                        b'n' => b'\n',
+                        b't' => b'\t',
+                        b'r' => b'\r',
+                        b'\\' => b'\\',
+                        b'"' => b'"',
                         other => {
                             return Err(LexError {
                                 message: format!("\\{} is not an escape I know", other as char),
@@ -250,7 +255,7 @@ impl<'a> Lexer<'a> {
                 }
                 _ => {
                     let c = self.bump();
-                    out.push(c as char);
+                    out.push(c);
                 }
             }
         }

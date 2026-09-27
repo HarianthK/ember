@@ -206,3 +206,15 @@ fn nested_functions_are_indented() {
     );
     assert_eq!(printed, print_stmts(&parse(&printed).unwrap(), 0));
 }
+
+// The lexer reads bytes. It used to turn each byte of a string into a character of its
+// own, so é (two bytes) came out as "Ã©", and it counted columns in bytes too.
+#[test]
+fn non_ascii_text_survives_lexing() {
+    assert_eq!(kinds("\"héllo\""), vec![Tok::Str("héllo".into()), Tok::Eof]);
+    assert_eq!(kinds("\"日本\""), vec![Tok::Str("日本".into()), Tok::Eof]);
+    assert_eq!(kinds("\"é\n\""), vec![Tok::Str("é\n".into()), Tok::Eof]);
+    // Columns count characters: the @ is the fifth character on the line.
+    let e = tokenize("\"é\" @").unwrap_err();
+    assert_eq!(e.at.col, 5, "{e}");
+}
