@@ -36,16 +36,18 @@ person.name = "Ada";
 - [x] **Phase 4, the garbage collector.** Objects live in a heap the VM owns
       and are freed by mark and sweep, including the cycles that reference
       counting leaked. A stress mode collects before every instruction.
-- [ ] **Phase 5, the finish.** A REPL, a small standard library, error traces
-      with line numbers, and benchmarks against a tree-walker.
+- [x] **Phase 5, the finish.** A REPL, a small standard library, and a
+      benchmark against a tree-walking interpreter written for the purpose.
 
 ## Running it
 
-    cargo run -- examples/tour.em               # runs it
+    cargo run                                   # the REPL
+    cargo run -- examples/tour.em               # runs a file
     cargo run -- examples/counter.em --dis      # shows the bytecode
     cargo run -- examples/tour.em --parse       # shows how the parser read it
     cargo test
     EMBER_STRESS_GC=1 cargo test                # the same, collecting constantly
+    cargo run --release --bin bench             # races the VM against a tree-walker
 
 The disassembly is a listing with the source line beside each instruction.
 Here `make_counter` returns a closure over its local `n`: `[local 1]` is the
@@ -74,12 +76,30 @@ error rather than a quiet `nil`. Semicolons are optional between statements, and
 `and`, `or` and `not` are words, returning whichever operand decided, so
 `name or "default"` works.
 
-Built in: `print`, `len`, `push`, `keys`, `has` and `clock`.
+Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `keys`, `has`, `range`,
+`join`, `split`, `floor` and `clock`.
+
+## How fast
+
+The same three programs on the VM, on a tree-walking interpreter over the same
+syntax tree, and on CPython 3.10 for scale. Median of three, release build.
+
+| program | ember VM | tree-walker | VM speed-up | CPython |
+| --- | --- | --- | --- | --- |
+| fib(27), recursion | 0.07s | 0.26s | 4.0x | 0.04s |
+| 3M-step loop over locals | 0.37s | 0.88s | 2.4x | 0.23s |
+| closure called 1M times | 0.18s | 0.36s | 2.0x | 0.15s |
+
+The bytecode design is two to four times faster than walking the tree, and still
+slower than CPython, which has thirty years of work in it. The last row was 1.0x
+until the benchmark exposed a copy on every global access; DOCS.md has the story.
 
 ## Checking it
 
-87 tests, one file per part of the language: parsing, the chunk, running
-expressions, calls, closures, lists, maps and the collector. They all pass a
+102 tests, one file per part of the language: parsing, the chunk, running
+expressions, calls, closures, lists, maps, the collector, the REPL and the
+standard library. Five more run every program on both the VM and the
+tree-walker, which share only the parser, and require the same output. They all pass a
 second time in stress mode, where the heap collects before every instruction
 that follows an allocation, which is how collector bugs get found. Programs are run and their printed
 output compared, and after every long program the stack must be empty, because

@@ -325,3 +325,53 @@ changed nothing, and cannot: a frame's closure always sits in its slot 0 on the
 stack, which is a root already. A root that no program can make matter only hides
 the assumption it depends on, so it is gone, and the assumption is written where
 the roots are.
+
+## Phase 5: the finish
+
+### The REPL is the same machine, kept
+
+The REPL keeps one VM for the whole session, so a line sees every global the
+lines before it made. A bare expression at the end of an entry is compiled to
+return its value instead of dropping it, and the REPL shows that value with
+strings in quotes, so `"1"` and `1` look different there even though `print`
+shows both as 1. An entry the parser could not finish, an open brace or string or
+a trailing operator, gets another line; an entry that is simply wrong, like
+`1 +* 2`, is reported at once rather than waiting forever for input that cannot
+fix it. The rule is the parser's own message: "never closed" or "end of input"
+means wait.
+
+### A small library, chosen by what programs needed
+
+`str` and `num` convert both ways, `range` makes a list to count over, `pop` makes
+a list a stack, `join` and `split` undo each other, and `floor` exists because
+every number is a float and whole-number division has to be spelled. `split`
+with an empty separator splits into characters, not bytes, which the test for it
+checks with an é.
+
+### Measuring against a tree-walker
+
+The first section of these notes argued that bytecode beats walking the tree.
+Arguing is not measuring, so there is now a tree-walking interpreter over the
+same syntax tree, written the textbook way: a hash map per scope, searched
+outwards for every name. It only runs what the benchmarks need. Before timing
+anything, the benchmark checks that both engines print the same answer, and a
+test file runs five more programs on both. They share only the parser, so this is
+a check neither implementation can pass by sharing a mistake. The first version of
+that test missed a tree-walker that let an `if` branch declare into the scope
+around it; there is now a program that notices.
+
+### What the benchmark found
+
+The first run had the VM four times faster on recursion, two and a half times on a
+loop over locals, and exactly level on a closure called a million times from the
+top level. Level meant something was wrong. That loop runs at the top level, so
+`i` and `c` are globals, and every global read and write went through a helper
+that cloned the variable's name out of the constant table to look it up: an
+allocation on every access, in the hottest loop. Borrowing the name instead took
+that benchmark from 0.35 to 0.18 seconds, twice the tree-walker, and left the
+other two unchanged, since they barely touch globals.
+
+The remaining gap to CPython is honest: CPython caches global lookups, uses a
+faster hash, and has had decades of tuning. Globals here are still a hash map
+keyed by name; resolving them to slots at compile time, as locals already are,
+is the obvious next step and is written down here rather than done.
