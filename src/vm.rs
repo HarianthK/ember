@@ -17,10 +17,11 @@ struct Frame {
     base: usize,
 }
 
-// What the run loop raises: what went wrong and where. run() adds the call stack.
+// What the run loop raises: what went wrong, and the index of the instruction that failed
+// in the running function. run() turns that into a line, so no instruction pays for it.
 struct Fault {
     message: String,
-    at: Span,
+    at: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +120,7 @@ impl Vm {
     fn arith(
         &mut self,
         op: &str,
-        at: Span,
+        at: usize,
         f: fn(f64, f64) -> Result<Value, &'static str>,
     ) -> Result<(), Fault> {
         let b = self.pop();
@@ -187,11 +188,19 @@ impl Vm {
     pub fn run(&mut self, script: Rc<Function>) -> Result<Value, RuntimeError> {
         let script = self.link(&script);
         self.execute(script).map_err(|fault| {
+            // The failing frame is the last one; the fault's index is into that function's code.
+            let at = self
+                .frames
+                .last()
+                .expect("a fault happens inside a frame")
+                .function
+                .chunk
+                .span(fault.at);
             // The failing frame is at the fault itself; every frame below it is paused at its call.
             let mut trace = Vec::new();
             for (i, frame) in self.frames.iter().enumerate().rev() {
                 let line = if i + 1 == self.frames.len() {
-                    fault.at.line
+                    at.line
                 } else {
                     frame.function.chunk.span(frame.ip - 1).line
                 };
@@ -203,7 +212,7 @@ impl Vm {
             self.open_upvalues.clear();
             RuntimeError {
                 message: fault.message,
-                at: fault.at,
+                at,
                 trace,
             }
         })
@@ -283,7 +292,7 @@ impl Vm {
             }
             let chunk = &func.chunk;
             let op = chunk.code[ip];
-            let at = chunk.span(ip);
+            let at = ip;
             ip += 1;
             match op {
                 Op::Constant(k) => self.stack.push(chunk.constants[k as usize].clone()),
@@ -650,7 +659,7 @@ impl Vm {
 }
 
 // An index must be a whole number inside the list; there is no negative indexing.
-fn whole_index(index: &Value, len: usize, what: &str, at: Span) -> Result<usize, Fault> {
+fn whole_index(index: &Value, len: usize, what: &str, at: usize) -> Result<usize, Fault> {
     let n = match index {
         Value::Number(n) if n.fract() == 0.0 => *n,
         other => {
@@ -669,7 +678,7 @@ fn whole_index(index: &Value, len: usize, what: &str, at: Span) -> Result<usize,
     Ok(n as usize)
 }
 
-fn map_key(key: &Value, at: Span) -> Result<String, Fault> {
+fn map_key(key: &Value, at: usize) -> Result<String, Fault> {
     match key {
         Value::Str(s) => Ok(s.clone()),
         other => Err(Fault {
