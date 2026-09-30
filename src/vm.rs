@@ -114,20 +114,34 @@ impl Vm {
             .expect("the compiler emitted a pop with nothing on the stack")
     }
 
-    fn numbers(&mut self, op: &str, at: Span) -> Result<(f64, f64), Fault> {
+    // Arithmetic and comparison on two numbers, done in place: the right operand is popped
+    // and the left one is overwritten with the result, one trip to the stack instead of three.
+    fn arith(
+        &mut self,
+        op: &str,
+        at: Span,
+        f: fn(f64, f64) -> Result<Value, &'static str>,
+    ) -> Result<(), Fault> {
         let b = self.pop();
-        let a = self.pop();
-        match (&a, &b) {
-            (Value::Number(x), Value::Number(y)) => Ok((*x, *y)),
-            _ => Err(Fault {
-                message: format!(
-                    "{op} needs two numbers, not a {} and a {}",
-                    a.type_name(),
-                    b.type_name()
-                ),
-                at,
-            }),
-        }
+        let a = self.stack.last_mut().expect("a left operand");
+        let result = match (&*a, &b) {
+            (Value::Number(x), Value::Number(y)) => f(*x, *y),
+            _ => {
+                return Err(Fault {
+                    message: format!(
+                        "{op} needs two numbers, not a {} and a {}",
+                        a.type_name(),
+                        b.type_name()
+                    ),
+                    at,
+                });
+            }
+        };
+        *a = result.map_err(|message| Fault {
+            message: message.into(),
+            at,
+        })?;
+        Ok(())
     }
 
     // The slot for a global name, made the first time the name is seen, in any program.
@@ -276,6 +290,15 @@ impl Vm {
                 Op::Nil => self.stack.push(Value::Nil),
                 Op::True => self.stack.push(Value::Bool(true)),
                 Op::False => self.stack.push(Value::Bool(false)),
+                // Two numbers, the common case, are added in place like the other operators.
+                Op::Add
+                    if matches!(
+                        self.stack.as_slice(),
+                        [.., Value::Number(_), Value::Number(_)]
+                    ) =>
+                {
+                    self.arith("+", at, |x, y| Ok(Value::Number(x + y)))?
+                }
                 Op::Add => {
                     let b = self.pop();
                     let a = self.pop();
@@ -302,35 +325,23 @@ impl Vm {
                     };
                     self.stack.push(result);
                 }
-                Op::Sub => {
-                    let (a, b) = self.numbers("-", at)?;
-                    self.stack.push(Value::Number(a - b));
-                }
-                Op::Mul => {
-                    let (a, b) = self.numbers("*", at)?;
-                    self.stack.push(Value::Number(a * b));
-                }
-                Op::Div => {
-                    let (a, b) = self.numbers("/", at)?;
-                    // Dividing by zero is an error rather than infinity, which is what people expect.
-                    if b == 0.0 {
-                        return Err(Fault {
-                            message: "division by zero".into(),
-                            at,
-                        });
+                Op::Sub => self.arith("-", at, |x, y| Ok(Value::Number(x - y)))?,
+                Op::Mul => self.arith("*", at, |x, y| Ok(Value::Number(x * y)))?,
+                // Dividing by zero is an error rather than infinity, which is what people expect.
+                Op::Div => self.arith("/", at, |x, y| {
+                    if y == 0.0 {
+                        Err("division by zero")
+                    } else {
+                        Ok(Value::Number(x / y))
                     }
-                    self.stack.push(Value::Number(a / b));
-                }
-                Op::Rem => {
-                    let (a, b) = self.numbers("%", at)?;
-                    if b == 0.0 {
-                        return Err(Fault {
-                            message: "remainder by zero".into(),
-                            at,
-                        });
+                })?,
+                Op::Rem => self.arith("%", at, |x, y| {
+                    if y == 0.0 {
+                        Err("remainder by zero")
+                    } else {
+                        Ok(Value::Number(x % y))
                     }
-                    self.stack.push(Value::Number(a % b));
-                }
+                })?,
                 Op::Neg => match self.pop() {
                     Value::Number(n) => self.stack.push(Value::Number(-n)),
                     other => {
@@ -354,22 +365,10 @@ impl Vm {
                     let a = self.pop();
                     self.stack.push(Value::Bool(a != b));
                 }
-                Op::Less => {
-                    let (a, b) = self.numbers("<", at)?;
-                    self.stack.push(Value::Bool(a < b));
-                }
-                Op::LessEq => {
-                    let (a, b) = self.numbers("<=", at)?;
-                    self.stack.push(Value::Bool(a <= b));
-                }
-                Op::Greater => {
-                    let (a, b) = self.numbers(">", at)?;
-                    self.stack.push(Value::Bool(a > b));
-                }
-                Op::GreaterEq => {
-                    let (a, b) = self.numbers(">=", at)?;
-                    self.stack.push(Value::Bool(a >= b));
-                }
+                Op::Less => self.arith("<", at, |x, y| Ok(Value::Bool(x < y)))?,
+                Op::LessEq => self.arith("<=", at, |x, y| Ok(Value::Bool(x <= y)))?,
+                Op::Greater => self.arith(">", at, |x, y| Ok(Value::Bool(x > y)))?,
+                Op::GreaterEq => self.arith(">=", at, |x, y| Ok(Value::Bool(x >= y)))?,
                 Op::Pop => {
                     self.pop();
                 }
