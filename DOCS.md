@@ -394,3 +394,26 @@ CPython's 0.15 on that program. The other two barely use globals and did not
 move. Breaking the linker so it skips the functions inside a program fails ten
 tests, and a new one checks that late binding survived: a function that uses a
 global defined after it, and a global redefined in place.
+
+## Measuring small things
+
+The tight loop trailed CPython by about 40%, and I named two suspects in
+advance: every instruction looked up its source line in case it failed, and I
+believed every value was 32 bytes wide. The second was simply wrong. A value is
+24 bytes, because Rust hides the enum's tag in bits the string inside it never
+uses; checking the premise with `size_of` took one line.
+
+The first measurement then said the line lookup did not matter, and neither did
+two further experiments, doing arithmetic in place and skipping the collector's
+check. Three things making no difference at all is itself a signal. The timer
+ran the whole program from the shell, nine times, and took the median, and
+starting a process on this machine turned out to take about 80ms and vary by
+40ms from run to run: noise as large as the effects being looked for.
+
+Timed inside one process instead, median of fifteen, the answers were clear and
+steady. Doing each arithmetic and comparison instruction in place, popping the
+right operand and overwriting the left, took the loop from 342 to 301ms, 12%.
+Finding an error's line only when there is an error, with the fault carrying
+the instruction's index until then, took it on to 280ms, another 8%. Both would
+have been thrown away on the first measurement. The loop is now about 17%
+behind CPython, where it was 42% behind that morning.
