@@ -126,10 +126,15 @@ pub enum Op {
     GreaterEq,
     Pop,
     Return,
-    // Globals are looked up by name, the operand being the name's constant.
+    // Globals as the compiler emits them, by name: the operand is the name's constant.
     DefineGlobal(u16),
     GetGlobal(u16),
     SetGlobal(u16),
+    // The same after linking, which gives every global name a numbered slot in the VM.
+    // The VM only ever runs these; the named forms are replaced before the first instruction.
+    DefineGlobalAt(u16),
+    GetGlobalAt(u16),
+    SetGlobalAt(u16),
     // Locals live on the stack; the operand is the slot, so no name is looked up at run time.
     GetLocal(u16),
     SetLocal(u16),
@@ -208,6 +213,11 @@ impl Chunk {
                     let name = format!("{op:?}");
                     let name = name[..name.find('(').unwrap()].to_uppercase();
                     format!("{name:<12} {k:>4} ({})", self.constants[*k as usize])
+                }
+                Op::DefineGlobalAt(slot) | Op::GetGlobalAt(slot) | Op::SetGlobalAt(slot) => {
+                    let name = format!("{op:?}");
+                    let name = name[..name.find('(').unwrap()].to_uppercase();
+                    format!("{name:<12} {slot:>4}")
                 }
                 Op::Call(argc) => format!("{:<12} {argc:>4}", "CALL"),
                 Op::BuildList(n) => format!("{:<12} {n:>4}", "BUILDLIST"),

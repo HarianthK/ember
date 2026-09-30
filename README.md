@@ -86,13 +86,14 @@ syntax tree, and on CPython 3.10 for scale. Median of three, release build.
 
 | program | ember VM | tree-walker | VM speed-up | CPython |
 | --- | --- | --- | --- | --- |
-| fib(27), recursion | 0.07s | 0.26s | 4.0x | 0.04s |
-| 3M-step loop over locals | 0.37s | 0.88s | 2.4x | 0.23s |
-| closure called 1M times | 0.18s | 0.36s | 2.0x | 0.15s |
+| fib(27), recursion | 0.06s | 0.29s | 5.0x | 0.05s |
+| 3M-step loop over locals | 0.34s | 0.91s | 2.7x | 0.27s |
+| closure called 1M times | 0.13s | 0.36s | 2.8x | 0.15s |
 
-The bytecode design is two to four times faster than walking the tree, and still
-slower than CPython, which has thirty years of work in it. The last row was 1.0x
-until the benchmark exposed a copy on every global access; DOCS.md has the story.
+The bytecode design is three to five times faster than walking the tree. It is
+level with CPython on recursion, slower on a tight loop, and slightly ahead on
+the closure program, which was 1.0x the tree-walker until the benchmark exposed
+how globals were looked up; DOCS.md has the story.
 
 ## Checking it
 

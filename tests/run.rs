@@ -308,3 +308,17 @@ fn errors_point_at_the_operator_or_name_that_failed() {
     let e = err("print(1)\nprint(2 < nil)");
     assert!(e.contains("at line 2, column 9"), "{e}");
 }
+
+// Globals are bound by slot when a program is linked, not when it is compiled, so a
+// function can use a global defined after it, and redefining one reuses its slot.
+#[test]
+fn globals_bind_late_and_can_be_redefined() {
+    let src = "fn show() { return later * 2 }
+let later = 21
+print(show())
+let later = 50
+print(show())";
+    assert_eq!(out(src), ["42", "100"]);
+    let e = err("fn early() { return missing }\nearly()");
+    assert!(e.contains("missing is not defined"), "{e}");
+}

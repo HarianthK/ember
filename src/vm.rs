@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk, Function, Native, Op, Value};
+use crate::chunk::{Function, Native, Op, Value};
 use crate::heap::{Closure, Heap, Obj, Ref, Upvalue};
 use crate::lexer::Span;
 use std::collections::{BTreeMap, HashMap};
@@ -59,7 +59,11 @@ impl fmt::Display for RuntimeError {
 pub struct Vm {
     stack: Vec<Value>,
     frames: Vec<Frame>,
-    globals: HashMap<String, Value>,
+    // Globals live in numbered slots; the name table is how link() finds a name's slot
+    // and how an error names a global that was never defined (its slot still None).
+    globals: Vec<Option<Value>>,
+    global_names: Vec<String>,
+    global_slots: HashMap<String, u16>,
     // Upvalues still pointing at a live stack slot, so a second capture of the same slot
     // finds and shares the first rather than making a copy.
     open_upvalues: Vec<Ref>,
@@ -80,15 +84,17 @@ impl Vm {
         let mut vm = Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::new(),
-            globals: HashMap::new(),
+            globals: Vec::new(),
+            global_names: Vec::new(),
+            global_slots: HashMap::new(),
             open_upvalues: Vec::new(),
             heap: Heap::default(),
             output: Vec::new(),
             echo: false,
         };
         for native in NATIVES {
-            vm.globals
-                .insert(native.name.to_string(), Value::Native(Rc::new(native)));
+            let slot = vm.global_slot(native.name) as usize;
+            vm.globals[slot] = Some(Value::Native(Rc::new(native)));
         }
         // EMBER_STRESS_GC=1 cargo test runs every test with a collection before every
         // instruction that follows an allocation.
@@ -124,7 +130,48 @@ impl Vm {
         }
     }
 
+    // The slot for a global name, made the first time the name is seen, in any program.
+    fn global_slot(&mut self, name: &str) -> u16 {
+        if let Some(&slot) = self.global_slots.get(name) {
+            return slot;
+        }
+        let slot = self.globals.len() as u16;
+        self.globals.push(None);
+        self.global_names.push(name.to_string());
+        self.global_slots.insert(name.to_string(), slot);
+        slot
+    }
+
+    // Rewrites every global a function and the functions inside it use, from a name to a
+    // slot, so running it never hashes a name. The slots outlive the program, which is what
+    // lets a REPL line use a global an earlier line defined.
+    fn link(&mut self, function: &Function) -> Rc<Function> {
+        let mut chunk = function.chunk.clone();
+        for i in 0..chunk.constants.len() {
+            if let Value::Function(inner) = &chunk.constants[i] {
+                let inner = Rc::clone(inner);
+                chunk.constants[i] = Value::Function(self.link(&inner));
+            }
+        }
+        for i in 0..chunk.code.len() {
+            let slot_of = |vm: &mut Vm, k: u16| vm.global_slot(name_of(&chunk.constants, k));
+            chunk.code[i] = match chunk.code[i] {
+                Op::DefineGlobal(k) => Op::DefineGlobalAt(slot_of(self, k)),
+                Op::GetGlobal(k) => Op::GetGlobalAt(slot_of(self, k)),
+                Op::SetGlobal(k) => Op::SetGlobalAt(slot_of(self, k)),
+                other => other,
+            };
+        }
+        Rc::new(Function {
+            name: function.name.clone(),
+            arity: function.arity,
+            chunk,
+            upvalues: function.upvalues.clone(),
+        })
+    }
+
     pub fn run(&mut self, script: Rc<Function>) -> Result<Value, RuntimeError> {
+        let script = self.link(&script);
         self.execute(script).map_err(|fault| {
             // The failing frame is at the fault itself; every frame below it is paused at its call.
             let mut trace = Vec::new();
@@ -189,7 +236,7 @@ impl Vm {
             _ => None,
         };
         roots.extend(self.stack.iter().filter_map(handle));
-        roots.extend(self.globals.values().filter_map(handle));
+        roots.extend(self.globals.iter().flatten().filter_map(handle));
         roots.extend(self.open_upvalues.iter().copied());
         self.heap.mark(roots);
         self.heap.sweep();
@@ -406,36 +453,35 @@ impl Vm {
                     ip = 0;
                     base = callee_at;
                 }
-                Op::DefineGlobal(k) => {
-                    let value = self.pop();
-                    self.globals.insert(name_of(chunk, k).to_string(), value);
+                Op::DefineGlobal(_) | Op::GetGlobal(_) | Op::SetGlobal(_) => {
+                    unreachable!("link() replaces every named global before a program runs")
                 }
-                Op::GetGlobal(k) => {
-                    let name = name_of(chunk, k);
-                    match self.globals.get(name) {
-                        Some(v) => self.stack.push(v.clone()),
-                        None => {
-                            return Err(Fault {
-                                message: format!("{name} is not defined"),
-                                at,
-                            });
-                        }
+                Op::DefineGlobalAt(slot) => {
+                    self.globals[slot as usize] = Some(self.pop());
+                }
+                Op::GetGlobalAt(slot) => match &self.globals[slot as usize] {
+                    Some(v) => self.stack.push(v.clone()),
+                    None => {
+                        return Err(Fault {
+                            message: format!("{} is not defined", self.global_names[slot as usize]),
+                            at,
+                        });
                     }
-                }
-                Op::SetGlobal(k) => {
-                    let name = name_of(chunk, k);
+                },
+                Op::SetGlobalAt(slot) => {
                     let value = self
                         .stack
                         .last()
                         .expect("assignment leaves its value")
                         .clone();
                     // Assigning never creates a variable, so a typo is an error rather than a new global.
-                    match self.globals.get_mut(name) {
-                        Some(slot) => *slot = value,
+                    match &mut self.globals[slot as usize] {
+                        Some(current) => *current = value,
                         None => {
                             return Err(Fault {
                                 message: format!(
-                                    "{name} is not defined; declare it with let first"
+                                    "{} is not defined; declare it with let first",
+                                    self.global_names[slot as usize]
                                 ),
                                 at,
                             });
@@ -634,10 +680,8 @@ fn map_key(key: &Value, at: Span) -> Result<String, Fault> {
     }
 }
 
-// Borrowed, not cloned: a copy of the name on every global read and write was the single
-// biggest cost in a loop at the top level.
-fn name_of(chunk: &Chunk, k: u16) -> &str {
-    match &chunk.constants[k as usize] {
+fn name_of(constants: &[Value], k: u16) -> &str {
+    match &constants[k as usize] {
         Value::Str(s) => s,
         other => unreachable!("a global's name constant is a string, not {other}"),
     }

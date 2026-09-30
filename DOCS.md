@@ -371,7 +371,26 @@ allocation on every access, in the hottest loop. Borrowing the name instead took
 that benchmark from 0.35 to 0.18 seconds, twice the tree-walker, and left the
 other two unchanged, since they barely touch globals.
 
-The remaining gap to CPython is honest: CPython caches global lookups, uses a
-faster hash, and has had decades of tuning. Globals here are still a hash map
-keyed by name; resolving them to slots at compile time, as locals already are,
-is the obvious next step and is written down here rather than done.
+### Globals by slot: a link step
+
+Even borrowed, every global access still hashed the variable's name. Locals
+never did: the compiler turns them into stack slots. Globals cannot be turned
+into slots by the compiler alone, because they belong to the whole session, not
+to one program: a REPL line uses globals an earlier line made, and a function
+may use a global that is only defined later in the file.
+
+So there is now a small linker between the compiler and the VM, as there is
+between a C compiler and a running program. The compiler still emits globals by
+name, which keeps its output and the disassembly readable. Before a program runs,
+the VM walks it, and every function inside it, and rewrites each named global to
+a numbered slot in a table the VM keeps for its whole life. A name seen for the
+first time gets a new slot holding nothing yet, so using a global before it is
+defined is still an error that can say its name. Running a program never hashes
+a name again.
+
+The closure benchmark went from 0.17 to 0.13 seconds, run twice on the same day
+to be sure, which takes it from 2.1x to 2.8x the tree-walker and just ahead of
+CPython's 0.15 on that program. The other two barely use globals and did not
+move. Breaking the linker so it skips the functions inside a program fails ten
+tests, and a new one checks that late binding survived: a function that uses a
+global defined after it, and a global redefined in place.
