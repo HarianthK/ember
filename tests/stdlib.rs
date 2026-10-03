@@ -91,3 +91,34 @@ for word in keys(counts) {
 print(join(lines, " "))"#;
     assert_eq!(out(src), ["and=2 bat=1 cat=1 hat=1 the=3"]);
 }
+
+#[test]
+fn sort_orders_the_list_itself() {
+    assert_eq!(
+        out("let xs = [3, -1, 2.5, 10, 0]
+sort(xs)
+print(xs)"),
+        ["[-1, 0, 2.5, 3, 10]"]
+    );
+    assert_eq!(
+        out(r#"let words = ["pear", "Apple", "fig", "apple"]
+sort(words)
+print(words)"#),
+        [r#"["Apple", "apple", "fig", "pear"]"#]
+    );
+    // In place, so every name for the list sees it sorted, and it returns nil like push.
+    assert_eq!(
+        out("let a = [2, 1]
+let b = a
+print(sort(a), b)"),
+        ["nil [1, 2]"]
+    );
+    assert_eq!(
+        out("let e = []
+sort(e)
+print(e)"),
+        ["[]"]
+    );
+    assert!(err(r#"sort([1, "a"])"#).contains("sort needs a list of all numbers or all strings"));
+    assert!(err("sort(\"cba\")").contains("sort needs a list, not a string"));
+}

@@ -721,7 +721,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 13] = [
+const NATIVES: [Native; 14] = [
     Native {
         name: "print",
         arity: None,
@@ -787,7 +787,36 @@ const NATIVES: [Native; 13] = [
         arity: Some(1),
         call: native_floor,
     },
+    Native {
+        name: "sort",
+        arity: Some(1),
+        call: native_sort,
+    },
 ];
+
+// Sorts the list itself, as push changes it: numbers ascending, or strings by code point,
+// the order < uses. A mix is an error rather than a guess at which order was meant.
+fn native_sort(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let Value::List(r) = &args[0] else {
+        return Err(format!("sort needs a list, not a {}", args[0].type_name()));
+    };
+    let items = vm.heap.list_mut(*r);
+    if items.iter().all(|v| matches!(v, Value::Number(_))) {
+        // A total order, so even a NaN has a place and sorting cannot panic.
+        items.sort_by(|a, b| match (a, b) {
+            (Value::Number(x), Value::Number(y)) => x.total_cmp(y),
+            _ => unreachable!("checked above"),
+        });
+    } else if items.iter().all(|v| matches!(v, Value::Str(_))) {
+        items.sort_by(|a, b| match (a, b) {
+            (Value::Str(x), Value::Str(y)) => x.cmp(y),
+            _ => unreachable!("checked above"),
+        });
+    } else {
+        return Err("sort needs a list of all numbers or all strings".into());
+    }
+    Ok(Value::Nil)
+}
 
 // Any value as text, exactly as print would show it.
 fn native_str(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {

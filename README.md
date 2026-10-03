@@ -78,7 +78,7 @@ error rather than a quiet `nil`. Semicolons are optional between statements, and
 and `continue`. A negative index counts from the end, so `xs[-1]` is the last
 item, and strings compare with `<` and `>` by Unicode code point.
 
-Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `keys`, `has`, `range`,
+Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`.
 
 ## How fast
