@@ -133,6 +133,9 @@ impl Walker {
             }
             Stmt::Block(body) => return self.block(body, &Env::new(Some(Rc::clone(env)))),
             Stmt::For { .. } => return Err("the tree-walker does not run for loops".into()),
+            Stmt::Break { .. } | Stmt::Continue { .. } => {
+                return Err("the tree-walker does not run break or continue".into());
+            }
         }
         Ok(Flow::Normal)
     }

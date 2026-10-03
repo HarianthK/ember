@@ -25,8 +25,21 @@ struct Local {
 
 // One per function being compiled. They form a stack, innermost last, so resolving a
 // name can look outwards through every function the code is nested in.
+// A loop being compiled, for break and continue to find their way out of.
+struct Loop {
+    // Locals deeper than this belong to the loop's body and end when break or continue leaves it.
+    depth: usize,
+    // A while loop continues at its condition, known at once; a for loop continues at the
+    // step that advances its counter, which comes after the body, so those jumps are patched.
+    continue_to: Option<u16>,
+    continues: Vec<usize>,
+    breaks: Vec<usize>,
+}
+
 struct FnState {
     chunk: Chunk,
+    // Innermost last. Each function has its own, so break cannot leave a function.
+    loops: Vec<Loop>,
     // Locals in declaration order; a local's index here is its stack slot at run time.
     locals: Vec<Local>,
     depth: usize,
@@ -38,6 +51,7 @@ impl FnState {
     fn new(own_name: &str, is_script: bool) -> Self {
         FnState {
             chunk: Chunk::new(),
+            loops: Vec::new(),
             // Slot 0 holds the function being run. Naming it after the function is what
             // lets a function call itself by name without capturing anything.
             locals: vec![Local {
@@ -146,6 +160,52 @@ impl Compiler {
         }
     }
 
+    // Ends every local the innermost loop's body has declared so far, without forgetting them:
+    // the code after a break in the same block still compiles against them. Each is closed,
+    // not just popped, so a closure that captured it keeps its value.
+    fn leave_loop_body(&mut self) {
+        let depth = self.st_ref().loops.last().expect("inside a loop").depth;
+        let inside = self
+            .st_ref()
+            .locals
+            .iter()
+            .rev()
+            .take_while(|l| l.depth > depth)
+            .count();
+        for _ in 0..inside {
+            self.emit(Op::CloseUpvalue);
+        }
+    }
+
+    fn begin_loop(&mut self, continue_to: Option<u16>) {
+        let depth = self.st_ref().depth;
+        self.st().loops.push(Loop {
+            depth,
+            continue_to,
+            continues: Vec::new(),
+            breaks: Vec::new(),
+        });
+    }
+
+    // Call where the loop's continue lands, for a loop that did not know it at the start.
+    fn patch_continues(&mut self) -> Result<(), CompileError> {
+        let continues =
+            std::mem::take(&mut self.st().loops.last_mut().expect("inside a loop").continues);
+        for at in continues {
+            self.patch(at)?;
+        }
+        Ok(())
+    }
+
+    // Call once the loop's own cleanup is emitted: a break lands just after it.
+    fn end_loop(&mut self) -> Result<(), CompileError> {
+        let finished = self.st().loops.pop().expect("inside a loop");
+        for at in finished.breaks {
+            self.patch(at)?;
+        }
+        Ok(())
+    }
+
     fn constant(&mut self, value: Value) {
         let k = self.st().chunk.constant(value);
         self.emit(Op::Constant(k));
@@ -168,6 +228,7 @@ impl Compiler {
         self.constant(Value::Number(0.0));
         let i = self.declare(" i");
         let start = self.here()?;
+        self.begin_loop(None);
         self.emit(Op::GetLocal(i));
         self.emit(Op::GetLocal(seq));
         self.emit(Op::Len);
@@ -185,6 +246,7 @@ impl Compiler {
         }
         self.at = at;
         self.end_scope();
+        self.patch_continues()?;
         self.emit(Op::GetLocal(i));
         self.constant(Value::Number(1.0));
         self.emit(Op::Add);
@@ -193,6 +255,7 @@ impl Compiler {
         self.emit(Op::Jump(start));
         self.patch(to_exit)?;
         self.emit(Op::Pop);
+        self.end_loop()?;
         self.end_scope();
         Ok(())
     }
@@ -296,6 +359,7 @@ impl Compiler {
             }
             Stmt::While { cond, body } => {
                 let start = self.here()?;
+                self.begin_loop(Some(start));
                 self.expr(cond)?;
                 let to_exit = self.jump(Op::JumpIfFalse);
                 self.emit(Op::Pop);
@@ -303,8 +367,50 @@ impl Compiler {
                 self.emit(Op::Jump(start));
                 self.patch(to_exit)?;
                 self.emit(Op::Pop);
+                self.end_loop()?;
             }
             Stmt::Block(body) => self.block(body)?,
+            Stmt::Break { at } | Stmt::Continue { at } => {
+                self.at = *at;
+                let is_break = matches!(stmt, Stmt::Break { .. });
+                if self.st_ref().loops.is_empty() {
+                    return Err(CompileError {
+                        message: format!(
+                            "{} is only allowed inside a loop",
+                            if is_break { "break" } else { "continue" }
+                        ),
+                        at: *at,
+                    });
+                }
+                self.leave_loop_body();
+                let continue_to = self
+                    .st_ref()
+                    .loops
+                    .last()
+                    .expect("checked above")
+                    .continue_to;
+                match (is_break, continue_to) {
+                    (false, Some(start)) => self.emit(Op::Jump(start)),
+                    (false, None) => {
+                        let jump = self.jump(Op::Jump);
+                        self.st()
+                            .loops
+                            .last_mut()
+                            .expect("checked above")
+                            .continues
+                            .push(jump);
+                    }
+                    (true, _) => {
+                        let jump = self.jump(Op::Jump);
+                        self.st()
+                            .loops
+                            .last_mut()
+                            .expect("checked above")
+                            .breaks
+                            .push(jump);
+                    }
+                }
+            }
         }
         Ok(())
     }

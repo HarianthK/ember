@@ -181,6 +181,7 @@ fn printing_and_reparsing_is_stable() {
         "while not done and i < 10 { i = i + 1; }",
         r#"let m = {"a": 1, "b": [true, nil, -2.5]}; m.a = m["b"][0];"#,
         "let add = fn(a, b) { return a + b; }; add(1, 2);",
+        "while true { if done { break } if skip { continue } }",
     ];
     for src in sources {
         let first = parse(src).unwrap_or_else(|e| panic!("{src}: {e}"));

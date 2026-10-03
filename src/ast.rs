@@ -110,6 +110,12 @@ pub enum Stmt {
         at: Span,
     },
     Block(Vec<Stmt>),
+    Break {
+        at: Span,
+    },
+    Continue {
+        at: Span,
+    },
 }
 
 // Printed back as source, which is how the parser's output is checked.
@@ -171,6 +177,8 @@ pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
             )
         }
         Stmt::Block(body) => print_block(body, indent),
+        Stmt::Break { .. } => "break;".to_string(),
+        Stmt::Continue { .. } => "continue;".to_string(),
     };
     format!("{}{line}", pad(indent))
 }
