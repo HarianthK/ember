@@ -646,25 +646,35 @@ impl Vm {
                     }
                     self.stack.push(value);
                 }
+                Op::Iterable => match self.stack.last().expect("a value to loop over") {
+                    Value::List(_) | Value::Str(_) => {}
+                    Value::Map(r) => {
+                        let keys = self
+                            .heap
+                            .map(*r)
+                            .keys()
+                            .map(|k| Value::Str(k.clone()))
+                            .collect();
+                        let list = self.new_list(keys);
+                        *self.stack.last_mut().expect("checked above") = list;
+                    }
+                    other => {
+                        return Err(Fault {
+                            message: format!(
+                                "for needs a list, a string or a map, not a {}",
+                                other.type_name()
+                            ),
+                            at,
+                        });
+                    }
+                },
                 Op::Len => {
                     let n = match self.pop() {
                         Value::List(r) => self.heap.list(r).len(),
                         Value::Str(s) => s.chars().count(),
-                        Value::Map(_) => {
-                            return Err(Fault {
-                                message: "for needs a list or a string, not a map; loop over keys(m) instead".into(),
-                                at,
-                            });
-                        }
-                        other => {
-                            return Err(Fault {
-                                message: format!(
-                                    "for needs a list or a string, not a {}",
-                                    other.type_name()
-                                ),
-                                at,
-                            });
-                        }
+                        other => unreachable!(
+                            "Iterable lets only a list or a string through, not {other}"
+                        ),
                     };
                     self.stack.push(Value::Number(n as f64));
                 }

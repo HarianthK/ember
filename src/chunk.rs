@@ -152,6 +152,9 @@ pub enum Op {
     BuildMap(u16),
     GetIndex,
     SetIndex,
+    // Starts a for loop: a map becomes a list of its keys, taken once, so changing the map
+    // inside the loop cannot change what it walks; a list or string is left as it is.
+    Iterable,
     // The length of the list or string on top of the stack, for `for` to count with.
     Len,
     // Jumps name the instruction to go to, not a distance, so one op serves both directions.

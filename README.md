@@ -76,7 +76,8 @@ error rather than a quiet `nil`. Semicolons are optional between statements, and
 `and`, `or` and `not` are words, returning whichever operand decided, so
 `name or "default"` works. Loops are `while` and `for x in list`, with `break`
 and `continue`. A negative index counts from the end, so `xs[-1]` is the last
-item, and strings compare with `<` and `>` by Unicode code point.
+item, and strings compare with `<` and `>` by Unicode code point. `for` walks
+a list, a string, or a map's keys in sorted order.
 
 Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`.

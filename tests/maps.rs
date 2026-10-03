@@ -104,7 +104,7 @@ fn map_mistakes_say_what_went_wrong() {
     assert!(e.contains(r#"the map has no key "b" at line 2"#), "{e}");
     assert!(err("let m = {1: 2}").contains("map keys must be strings, not a number"));
     assert!(err("let m = {}\nm[1] = 2").contains("map keys must be strings, not a number"));
-    assert!(err("for k in {} { }").contains("loop over keys(m) instead"));
+    assert!(err("for k in 5 { }").contains("for needs a list, a string or a map, not a number"));
     assert!(err("let n = 5\nprint(n.x)").contains("a number cannot be indexed"));
     assert!(
         err("let n = 5\nn.x = 1")
@@ -124,4 +124,22 @@ for word in ["a", "b", "a", "c", "a"] {
     let mut vm = Vm::new();
     vm.run(script).unwrap();
     assert_eq!(vm.stack_depth(), 0);
+}
+
+#[test]
+fn for_walks_a_maps_keys_in_order() {
+    let src = r#"let ages = {"cy": 3, "al": 1, "bo": 2}
+for name in ages { print(name, ages[name]) }
+for k in {} { print("never") }"#;
+    assert_eq!(out(src), ["al 1", "bo 2", "cy 3"]);
+    // The keys are taken once, when the loop starts, so adding to the map inside the loop
+    // neither runs forever nor changes what the loop walks.
+    let src = r#"let m = {"a": 1}
+let seen = 0
+for k in m {
+  m[k + "!"] = 0
+  seen = seen + 1
+}
+print(seen, len(m))"#;
+    assert_eq!(out(src), ["1 2"]);
 }

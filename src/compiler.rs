@@ -224,6 +224,7 @@ impl Compiler {
         self.st().depth += 1;
         self.expr(iter)?;
         self.at = at;
+        self.emit(Op::Iterable);
         let seq = self.declare(" seq");
         self.constant(Value::Number(0.0));
         let i = self.declare(" i");

@@ -132,7 +132,7 @@ fn list_mistakes_say_what_went_wrong() {
         err("let s = \"ab\"\ns[0] = \"c\"")
             .contains("only a list's or a map's items can be assigned, not a string's")
     );
-    assert!(err("for x in 5 { }").contains("for needs a list or a string, not a number"));
+    assert!(err("for x in 5 { }").contains("for needs a list, a string or a map, not a number"));
     assert!(err("push(1, 2)").contains("push needs a list, not a number"));
     assert!(err("print([1] + 1)").contains("+ needs two numbers, two strings or two lists"));
 }
