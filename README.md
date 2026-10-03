@@ -74,7 +74,9 @@ Lists and maps are shared, not copied, as in Python. Map keys are strings, and
 `m.name` is sugar for `m["name"]`. A missing key or an undefined name is an
 error rather than a quiet `nil`. Semicolons are optional between statements, and
 `and`, `or` and `not` are words, returning whichever operand decided, so
-`name or "default"` works.
+`name or "default"` works. Loops are `while` and `for x in list`, with `break`
+and `continue`. A negative index counts from the end, so `xs[-1]` is the last
+item, and strings compare with `<` and `>` by Unicode code point.
 
 Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`.

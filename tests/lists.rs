@@ -124,7 +124,8 @@ fn list_mistakes_say_what_went_wrong() {
         e.contains("index 3 is out of range for a list of length 3 at line 2"),
         "{e}"
     );
-    assert!(err("print([1][-1])").contains("index -1 is out of range"));
+    // Negative indexes count from the end, but only as far as the start.
+    assert!(err("print([1][-2])").contains("index -2 is out of range for a list of length 1"));
     assert!(err("print([1][0.5])").contains("a list index must be a whole number, not 0.5"));
     assert!(err("print(5[0])").contains("a number cannot be indexed"));
     assert!(
@@ -149,4 +150,22 @@ for row in [[1, 2], [3], []] {
     let mut vm = Vm::new();
     vm.run(script).unwrap();
     assert_eq!(vm.stack_depth(), 0);
+}
+
+#[test]
+fn negative_indexes_count_from_the_end() {
+    assert_eq!(
+        out("let xs = [10, 20, 30]
+print(xs[-1], xs[-3])"),
+        ["30 10"]
+    );
+    assert_eq!(
+        out("let xs = [10, 20, 30]
+xs[-1] = 99
+print(xs)"),
+        ["[10, 20, 99]"]
+    );
+    assert_eq!(out(r#"print("héllo"[-4], "abc"[-1])"#), ["é c"]);
+    // An empty list has nothing at -1 either.
+    assert!(err("print([][-1])").contains("index -1 is out of range for a list of length 0"));
 }

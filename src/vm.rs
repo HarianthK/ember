@@ -682,7 +682,8 @@ impl Vm {
     }
 }
 
-// An index must be a whole number inside the list; there is no negative indexing.
+// An index must be a whole number. A negative one counts from the end, as in Python, so
+// -1 is the last item; from -len to len - 1 is in range.
 fn whole_index(index: &Value, len: usize, what: &str, at: usize) -> Result<usize, Fault> {
     let n = match index {
         Value::Number(n) if n.fract() == 0.0 => *n,
@@ -693,13 +694,14 @@ fn whole_index(index: &Value, len: usize, what: &str, at: usize) -> Result<usize
             });
         }
     };
-    if n < 0.0 || n >= len as f64 {
+    let from_start = if n < 0.0 { n + len as f64 } else { n };
+    if from_start < 0.0 || from_start >= len as f64 {
         return Err(Fault {
             message: format!("index {n} is out of range for a {what} of length {len}"),
             at,
         });
     }
-    Ok(n as usize)
+    Ok(from_start as usize)
 }
 
 fn map_key(key: &Value, at: usize) -> Result<String, Fault> {
