@@ -1,6 +1,7 @@
 use crate::chunk::{Function, Native, Op, Value};
 use crate::heap::{Closure, Heap, Obj, Ref, Upvalue};
 use crate::lexer::Span;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
@@ -117,6 +118,29 @@ impl Vm {
 
     // Arithmetic and comparison on two numbers, done in place: the right operand is popped
     // and the left one is overwritten with the result, one trip to the stack instead of three.
+    // Ordering two numbers, or two strings by Unicode code point, in place like arith. A NaN
+    // is unordered, so every comparison with one is false, as IEEE floats require.
+    fn compare(&mut self, op: &str, at: usize, test: fn(Ordering) -> bool) -> Result<(), Fault> {
+        let b = self.pop();
+        let a = self.stack.last_mut().expect("a left operand");
+        let order = match (&*a, &b) {
+            (Value::Number(x), Value::Number(y)) => x.partial_cmp(y),
+            (Value::Str(x), Value::Str(y)) => Some(x.cmp(y)),
+            _ => {
+                return Err(Fault {
+                    message: format!(
+                        "{op} needs two numbers or two strings, not a {} and a {}",
+                        a.type_name(),
+                        b.type_name()
+                    ),
+                    at,
+                });
+            }
+        };
+        *a = Value::Bool(order.is_some_and(test));
+        Ok(())
+    }
+
     fn arith(
         &mut self,
         op: &str,
@@ -374,10 +398,10 @@ impl Vm {
                     let a = self.pop();
                     self.stack.push(Value::Bool(a != b));
                 }
-                Op::Less => self.arith("<", at, |x, y| Ok(Value::Bool(x < y)))?,
-                Op::LessEq => self.arith("<=", at, |x, y| Ok(Value::Bool(x <= y)))?,
-                Op::Greater => self.arith(">", at, |x, y| Ok(Value::Bool(x > y)))?,
-                Op::GreaterEq => self.arith(">=", at, |x, y| Ok(Value::Bool(x >= y)))?,
+                Op::Less => self.compare("<", at, Ordering::is_lt)?,
+                Op::LessEq => self.compare("<=", at, Ordering::is_le)?,
+                Op::Greater => self.compare(">", at, Ordering::is_gt)?,
+                Op::GreaterEq => self.compare(">=", at, Ordering::is_ge)?,
                 Op::Pop => {
                     self.pop();
                 }

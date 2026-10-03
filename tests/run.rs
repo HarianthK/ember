@@ -322,3 +322,19 @@ print(show())";
     let e = err("fn early() { return missing }\nearly()");
     assert!(e.contains("missing is not defined"), "{e}");
 }
+
+// Strings order by Unicode code point, so the comparison is case-sensitive.
+#[test]
+fn strings_compare_by_code_point() {
+    assert_eq!(
+        out(r#"print("apple" < "banana", "b" > "a", "same" <= "same", "" < "a")"#),
+        ["true true true true"]
+    );
+    assert_eq!(out(r#"print("B" < "a", "Zebra" < "apple")"#), ["true true"]);
+    assert_eq!(out(r#"print("é" > "z", "10" < "9")"#), ["true true"]);
+    let e = err(r#"print(1 < "a")"#);
+    assert!(
+        e.contains("< needs two numbers or two strings, not a number and a string"),
+        "{e}"
+    );
+}
