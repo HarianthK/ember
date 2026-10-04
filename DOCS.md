@@ -417,3 +417,22 @@ Finding an error's line only when there is an error, with the fault carrying
 the instruction's index until then, took it on to 280ms, another 8%. Both would
 have been thrown away on the first measurement. The loop is now about 17%
 behind CPython, where it was 42% behind that morning.
+
+## Part of the library is written in ember
+
+`map`, `filter` and `reduce` take a function and call it. A native written in
+Rust runs to completion inside one instruction and cannot call back into ember
+code, because the VM's run loop is not reentrant. Rather than make it so, these
+three are written in ember, in `src/prelude.em`, which every VM compiles and runs
+as it starts, the way many languages ship part of their standard library in the
+language itself. They are ordinary global functions: a program can read them,
+pass them around, or define its own `map` over the top.
+
+Two consequences showed at once. The collector tests count live objects exactly,
+and a fresh VM now holds three closures before the program starts, so those
+tests count above a baseline taken after the prelude loads. And an error inside
+one of them reports a line of the prelude, "at line 6", in a program that may be
+two lines long; the trace underneath still names the program's own line, as
+Python's traces show lines inside its library, but without file names the first
+line can mislead. Spans that name their source would fix that, and are not here
+yet.

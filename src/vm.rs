@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
 
+// map, filter and reduce, which take functions and so are written in ember.
+const PRELUDE: &str = include_str!("prelude.em");
+
 // Deep enough for any honest recursion, shallow enough to stop a runaway one quickly.
 const MAX_FRAMES: usize = 10_000;
 
@@ -101,6 +104,9 @@ impl Vm {
         // EMBER_STRESS_GC=1 cargo test runs every test with a collection before every
         // instruction that follows an allocation.
         vm.heap.stress = std::env::var_os("EMBER_STRESS_GC").is_some();
+        let prelude = crate::parser::parse(PRELUDE).expect("the prelude parses");
+        let prelude = crate::compiler::compile(&prelude).expect("the prelude compiles");
+        vm.run(prelude).expect("the prelude runs");
         vm
     }
 

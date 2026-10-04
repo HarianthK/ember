@@ -7,10 +7,17 @@ fn run_in(vm: &mut Vm, src: &str) {
     vm.run(script).unwrap_or_else(|e| panic!("{src}: {e}"));
 }
 
+// A fresh VM already holds the prelude's functions, so counts are taken above that.
+fn baseline(vm: &mut Vm) -> usize {
+    vm.collect();
+    vm.heap.live()
+}
+
 #[test]
 fn cycles_nothing_can_reach_are_freed() {
     // Reference counting could never free these: each list holds itself.
     let mut vm = Vm::new();
+    let base = baseline(&mut vm);
     run_in(
         &mut vm,
         "let i = 0
@@ -22,7 +29,7 @@ while i < 500 {
     );
     vm.collect();
     assert_eq!(
-        vm.heap.live(),
+        vm.heap.live() - base,
         0,
         "every list was garbage once the loop moved on"
     );
@@ -32,6 +39,7 @@ while i < 500 {
 fn an_object_holding_a_closure_over_itself_is_freed() {
     // The account map holds a closure whose upvalue holds the account map.
     let mut vm = Vm::new();
+    let base = baseline(&mut vm);
     run_in(
         &mut vm,
         "fn make_account(balance) {
@@ -47,12 +55,13 @@ while i < 200 {
     );
     vm.collect();
     // Only make_account itself is left: a top-level function is a closure held by a global.
-    assert_eq!(vm.heap.live(), 1);
+    assert_eq!(vm.heap.live() - base, 1);
 }
 
 #[test]
 fn what_a_global_can_reach_survives() {
     let mut vm = Vm::new();
+    let base = baseline(&mut vm);
     run_in(
         &mut vm,
         "fn make_counter() {
@@ -78,7 +87,7 @@ print(kept.counter(), kept.rows)",
     vm.collect();
     // The map, its counter closure, that closure's upvalue, the three lists, and
     // make_counter itself, which is a closure held by a global.
-    assert_eq!(vm.heap.live(), 7);
+    assert_eq!(vm.heap.live() - base, 7);
 }
 
 #[test]

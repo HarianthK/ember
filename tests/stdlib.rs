@@ -171,3 +171,40 @@ print(at, slice(s, at))"#),
     assert!(err(r#"find("a", 1)"#).contains("find needs a string to look for, not a number"));
     assert!(err("upper(nil)").contains("upper needs a string, not a nil"));
 }
+
+#[test]
+fn map_filter_and_reduce_take_functions() {
+    let src = "let xs = [1, 2, 3, 4, 5]
+print(map(xs, fn(x) { return x * x }))
+print(filter(xs, fn(x) { return x % 2 == 1 }))
+print(reduce(xs, fn(total, x) { return total + x }, 0))";
+    assert_eq!(out(src), ["[1, 4, 9, 16, 25]", "[1, 3, 5]", "15"]);
+    // Closures carry what they captured into the prelude's loop, and the results compose.
+    let src = r#"let at_least = 3
+let big = filter([1, 5, 2, 8, 3], fn(x) { return x >= at_least })
+print(big, reduce(map(big, str), fn(a, b) { return a + b }, ""))"#;
+    assert_eq!(out(src), [r#"[5, 8, 3] 583"#]);
+    // They walk whatever for walks: a string's characters, a map's keys.
+    assert_eq!(
+        out(r#"print(map("ab", upper), map({"y": 1, "x": 2}, upper))"#),
+        [r#"["A", "B"] ["X", "Y"]"#]
+    );
+    // The input is never changed: map and filter build new lists.
+    assert_eq!(
+        out("let xs = [1, 2]
+map(xs, fn(x) { return x + 1 })
+print(xs)"),
+        ["[1, 2]"]
+    );
+}
+
+#[test]
+fn a_mistake_inside_map_is_traced_through_it() {
+    let e = err("let xs = [1]
+map(xs, 5)");
+    assert!(e.contains("a number cannot be called"), "{e}");
+    assert!(
+        e.contains("in map,") && e.contains("in script, line 2"),
+        "{e}"
+    );
+}
