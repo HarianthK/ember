@@ -79,7 +79,7 @@ and `continue`. A negative index counts from the end, so `xs[-1]` is the last
 item, and strings compare with `<` and `>` by Unicode code point. `for` walks
 a list, a string, or a map's keys in sorted order.
 
-Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `keys`, `has`, `range`,
+Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `slice`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`.
 
 ## How fast

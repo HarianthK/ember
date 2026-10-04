@@ -122,3 +122,31 @@ print(e)"),
     assert!(err(r#"sort([1, "a"])"#).contains("sort needs a list of all numbers or all strings"));
     assert!(err("sort(\"cba\")").contains("sort needs a list, not a string"));
 }
+
+#[test]
+fn slice_takes_part_of_a_list_or_a_string() {
+    let src = "let xs = [10, 20, 30, 40, 50]
+print(slice(xs, 1, 3), slice(xs, 3), slice(xs, -2), slice(xs, 0, -1))
+print(xs)";
+    // The original is untouched: a slice is a new list.
+    assert_eq!(
+        out(src),
+        [
+            "[20, 30] [40, 50] [40, 50] [10, 20, 30, 40]",
+            "[10, 20, 30, 40, 50]"
+        ]
+    );
+    // Trimmed to fit rather than an error, and a backwards range is just empty.
+    assert_eq!(
+        out("let xs = [1, 2, 3]
+print(slice(xs, 0, 10), slice(xs, -10, 2), slice(xs, 2, 1))"),
+        ["[1, 2, 3] [1, 2] []"]
+    );
+    assert_eq!(
+        out(r#"print(slice("héllo", 1, 3), slice("héllo", -3))"#),
+        ["él llo"]
+    );
+    assert!(err("slice([1], 0.5)").contains("slice needs whole numbers, not 0.5"));
+    assert!(err("slice([1])").contains("slice takes 2 or 3 arguments, but was given 1"));
+    assert!(err("slice(5, 0)").contains("slice needs a list or a string, not a number"));
+}

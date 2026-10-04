@@ -731,7 +731,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 14] = [
+const NATIVES: [Native; 15] = [
     Native {
         name: "print",
         arity: None,
@@ -802,7 +802,57 @@ const NATIVES: [Native; 14] = [
         arity: Some(1),
         call: native_sort,
     },
+    Native {
+        name: "slice",
+        arity: None,
+        call: native_slice,
+    },
 ];
+
+// slice(xs, start) or slice(xs, start, end): a new list or string, the end not included.
+// Negative positions count from the end, and unlike an index a slice is trimmed to fit
+// rather than an error, as in Python, so "the first ten" works on a shorter list.
+fn native_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let (start, end) = match args {
+        [_, start] => (start, None),
+        [_, start, end] => (start, Some(end)),
+        _ => {
+            return Err(format!(
+                "slice takes 2 or 3 arguments, but was given {}",
+                args.len()
+            ));
+        }
+    };
+    let whole = |v: &Value| match v {
+        Value::Number(n) if n.fract() == 0.0 => Ok(*n),
+        other => Err(format!("slice needs whole numbers, not {other}")),
+    };
+    let (start, end) = (whole(start)?, end.map(whole).transpose()?);
+    let range = |len: usize| {
+        let fit =
+            |n: f64| (if n < 0.0 { n + len as f64 } else { n }).clamp(0.0, len as f64) as usize;
+        let from = fit(start);
+        (from, end.map_or(len, fit).max(from))
+    };
+    match &args[0] {
+        Value::List(r) => {
+            let items = vm.heap.list(*r);
+            let (from, to) = range(items.len());
+            let part = items[from..to].to_vec();
+            Ok(vm.new_list(part))
+        }
+        // By character, as indexing is, so "héllo" slices around the é, not through it.
+        Value::Str(s) => {
+            let chars: Vec<char> = s.chars().collect();
+            let (from, to) = range(chars.len());
+            Ok(Value::Str(chars[from..to].iter().collect()))
+        }
+        other => Err(format!(
+            "slice needs a list or a string, not a {}",
+            other.type_name()
+        )),
+    }
+}
 
 // Sorts the list itself, as push changes it: numbers ascending, or strings by code point,
 // the order < uses. A mix is an error rather than a guess at which order was meant.
