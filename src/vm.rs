@@ -32,22 +32,33 @@ struct Fault {
 pub struct RuntimeError {
     pub message: String,
     pub at: Span,
-    // Innermost call first: the function's name and the line it had reached.
-    pub trace: Vec<(String, u32)>,
+    // Empty when the fault is in the program itself, "prelude" when inside map and friends.
+    pub source: &'static str,
+    // Innermost call first: the function's name, its source and the line it had reached.
+    pub trace: Vec<(String, &'static str, u32)>,
+}
+
+// "line 6", or "prelude line 6" for code that is not the program's own.
+fn place(source: &str) -> String {
+    if source.is_empty() {
+        String::new()
+    } else {
+        format!("{source} ")
+    }
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.message, self.at)?;
+        write!(f, "{} at {}{}", self.message, place(self.source), self.at)?;
         // Runaway recursion is ten thousand identical frames; say so once, as Python does.
         let mut i = 0;
         while i < self.trace.len() {
-            let (name, line) = &self.trace[i];
+            let (name, source, line) = &self.trace[i];
             let repeats = self.trace[i..]
                 .iter()
                 .take_while(|entry| *entry == &self.trace[i])
                 .count();
-            write!(f, "\n  in {name}, line {line}")?;
+            write!(f, "\n  in {name}, {}line {line}", place(source))?;
             if repeats > 1 {
                 write!(
                     f,
@@ -105,7 +116,8 @@ impl Vm {
         // instruction that follows an allocation.
         vm.heap.stress = std::env::var_os("EMBER_STRESS_GC").is_some();
         let prelude = crate::parser::parse(PRELUDE).expect("the prelude parses");
-        let prelude = crate::compiler::compile(&prelude).expect("the prelude compiles");
+        let prelude =
+            crate::compiler::compile_from(&prelude, "prelude").expect("the prelude compiles");
         vm.run(prelude).expect("the prelude runs");
         vm
     }
@@ -219,13 +231,12 @@ impl Vm {
         let script = self.link(&script);
         self.execute(script).map_err(|fault| {
             // The failing frame is the last one; the fault's index is into that function's code.
-            let at = self
+            let failing = &self
                 .frames
                 .last()
                 .expect("a fault happens inside a frame")
-                .function
-                .chunk
-                .span(fault.at);
+                .function;
+            let (at, source) = (failing.chunk.span(fault.at), failing.chunk.source);
             // The failing frame is at the fault itself; every frame below it is paused at its call.
             let mut trace = Vec::new();
             for (i, frame) in self.frames.iter().enumerate().rev() {
@@ -234,7 +245,11 @@ impl Vm {
                 } else {
                     frame.function.chunk.span(frame.ip - 1).line
                 };
-                trace.push((frame.function.name.clone(), line));
+                trace.push((
+                    frame.function.name.clone(),
+                    frame.function.chunk.source,
+                    line,
+                ));
             }
             // Leave the machine ready for the next program, which is what a REPL will need.
             self.stack.clear();
@@ -243,6 +258,7 @@ impl Vm {
             RuntimeError {
                 message: fault.message,
                 at,
+                source,
                 trace,
             }
         })

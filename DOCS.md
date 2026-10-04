@@ -434,5 +434,7 @@ tests count above a baseline taken after the prelude loads. And an error inside
 one of them reports a line of the prelude, "at line 6", in a program that may be
 two lines long; the trace underneath still names the program's own line, as
 Python's traces show lines inside its library, but without file names the first
-line can mislead. Spans that name their source would fix that, and are not here
-yet.
+line can mislead. So every chunk now records its source, empty for the program
+and "prelude" for the library, and an error or a trace line from the prelude says
+so: "a number cannot be called at prelude line 6", "in map, prelude line 6", then
+"in script, line 2". Errors in the program read exactly as before.

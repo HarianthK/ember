@@ -208,10 +208,10 @@ report(10)";
     assert_eq!(e.message, "division by zero");
     assert_eq!(e.at.line, 2);
     // Innermost first: where it failed, then each caller at the line of its call.
-    let expected: Vec<(String, u32)> = vec![
-        ("average".into(), 2),
-        ("report".into(), 5),
-        ("script".into(), 8),
+    let expected: Vec<(String, &str, u32)> = vec![
+        ("average".into(), "", 2),
+        ("report".into(), "", 5),
+        ("script".into(), "", 8),
     ];
     assert_eq!(e.trace, expected);
     assert!(e.to_string().contains("\n  in report, line 5"), "{e}");

@@ -78,6 +78,7 @@ pub struct Compiler {
     states: Vec<FnState>,
     // The span of the statement being compiled, for expressions that carry none of their own.
     at: Span,
+    source: &'static str,
 }
 
 impl Compiler {
@@ -432,6 +433,7 @@ impl Compiler {
             at,
         })?;
         let mut state = FnState::new(&own_name, false);
+        state.chunk.source = self.source;
         // Parameters are the first locals, in the slots the caller's arguments already occupy.
         state.depth = 1;
         for param in params {
@@ -656,18 +658,30 @@ impl Compiler {
 
 // The whole program compiles to a function of no arguments, which the VM calls to start.
 pub fn compile(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
-    compile_script(program, false)
+    compile_script(program, false, "")
+}
+
+// The same for code from somewhere other than the program, whose errors should say so.
+pub fn compile_from(program: &[Stmt], source: &'static str) -> Result<Rc<Function>, CompileError> {
+    compile_script(program, false, source)
 }
 
 // For the REPL: a line ending in a bare expression returns its value instead of dropping it.
 pub fn compile_repl(program: &[Stmt]) -> Result<Rc<Function>, CompileError> {
-    compile_script(program, true)
+    compile_script(program, true, "")
 }
 
-fn compile_script(program: &[Stmt], keep_last: bool) -> Result<Rc<Function>, CompileError> {
+fn compile_script(
+    program: &[Stmt],
+    keep_last: bool,
+    source: &'static str,
+) -> Result<Rc<Function>, CompileError> {
+    let mut script = FnState::new("", true);
+    script.chunk.source = source;
     let mut c = Compiler {
-        states: vec![FnState::new("", true)],
+        states: vec![script],
         at: Span { line: 1, col: 1 },
+        source,
     };
     let (last, rest) = match program.split_last() {
         Some((Stmt::Expr(e), rest)) if keep_last => (Some(e), rest),

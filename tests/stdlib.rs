@@ -202,9 +202,14 @@ print(xs)"),
 fn a_mistake_inside_map_is_traced_through_it() {
     let e = err("let xs = [1]
 map(xs, 5)");
-    assert!(e.contains("a number cannot be called"), "{e}");
+    // The fault is inside the prelude, and the error says so, so its line is never read
+    // as a line of a program that may only be two lines long.
     assert!(
-        e.contains("in map,") && e.contains("in script, line 2"),
+        e.contains("a number cannot be called at prelude line"),
+        "{e}"
+    );
+    assert!(
+        e.contains("in map, prelude line") && e.contains("in script, line 2"),
         "{e}"
     );
 }

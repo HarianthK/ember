@@ -170,6 +170,9 @@ pub struct Chunk {
     pub code: Vec<Op>,
     pub spans: Vec<Span>,
     pub constants: Vec<Value>,
+    // Where the code came from, for errors: empty for the program being run, "prelude" for
+    // the library every VM loads, so a line number is never mistaken for one in the program.
+    pub source: &'static str,
 }
 
 impl Chunk {
