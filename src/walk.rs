@@ -183,6 +183,7 @@ impl Walker {
                     BinOp::LessEq => V::Bool(a <= b),
                     BinOp::Greater => V::Bool(a > b),
                     BinOp::GreaterEq => V::Bool(a >= b),
+                    BinOp::In => return Err("the tree-walker does not run in".into()),
                     BinOp::And | BinOp::Or => unreachable!("handled above"),
                 }
             }

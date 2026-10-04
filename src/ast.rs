@@ -15,6 +15,7 @@ pub enum BinOp {
     GreaterEq,
     And,
     Or,
+    In,
 }
 
 impl BinOp {
@@ -33,6 +34,7 @@ impl BinOp {
             BinOp::GreaterEq => ">=",
             BinOp::And => "and",
             BinOp::Or => "or",
+            BinOp::In => "in",
         }
     }
 }

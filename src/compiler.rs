@@ -558,6 +558,7 @@ impl Compiler {
                     BinOp::LessEq => Op::LessEq,
                     BinOp::Greater => Op::Greater,
                     BinOp::GreaterEq => Op::GreaterEq,
+                    BinOp::In => Op::In,
                     BinOp::And | BinOp::Or => unreachable!("handled above"),
                 });
             }

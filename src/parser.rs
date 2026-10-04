@@ -34,6 +34,8 @@ fn infix_power(tok: &Tok) -> Option<(BinOp, u8)> {
         Tok::LessEq => (BinOp::LessEq, 4),
         Tok::Greater => (BinOp::Greater, 4),
         Tok::GreaterEq => (BinOp::GreaterEq, 4),
+        // Membership sits with the comparisons, so 1 + 1 in xs is (1 + 1) in xs.
+        Tok::In => (BinOp::In, 4),
         Tok::Plus => (BinOp::Add, 5),
         Tok::Minus => (BinOp::Sub, 5),
         Tok::Star => (BinOp::Mul, 6),

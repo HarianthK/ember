@@ -424,6 +424,43 @@ impl Vm {
                 Op::LessEq => self.compare("<=", at, Ordering::is_le)?,
                 Op::Greater => self.compare(">", at, Ordering::is_gt)?,
                 Op::GreaterEq => self.compare(">=", at, Ordering::is_ge)?,
+                Op::In => {
+                    let container = self.pop();
+                    let item = self.stack.last_mut().expect("a left operand");
+                    let found = match (&container, &*item) {
+                        (Value::List(r), _) => self.heap.list(*r).contains(item),
+                        (Value::Map(r), Value::Str(key)) => self.heap.map(*r).contains_key(key),
+                        (Value::Str(text), Value::Str(part)) => text.contains(part.as_str()),
+                        (Value::Map(_), other) => {
+                            return Err(Fault {
+                                message: format!(
+                                    "map keys must be strings, not a {}",
+                                    other.type_name()
+                                ),
+                                at,
+                            });
+                        }
+                        (Value::Str(_), other) => {
+                            return Err(Fault {
+                                message: format!(
+                                    "in a string needs a string to look for, not a {}",
+                                    other.type_name()
+                                ),
+                                at,
+                            });
+                        }
+                        (other, _) => {
+                            return Err(Fault {
+                                message: format!(
+                                    "in needs a list, a map or a string on its right, not a {}",
+                                    other.type_name()
+                                ),
+                                at,
+                            });
+                        }
+                    };
+                    *item = Value::Bool(found);
+                }
                 Op::Pop => {
                     self.pop();
                 }

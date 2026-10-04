@@ -124,6 +124,8 @@ pub enum Op {
     LessEq,
     Greater,
     GreaterEq,
+    // Whether the value below is in the list, among the map's keys, or inside the string on top.
+    In,
     Pop,
     Return,
     // Globals as the compiler emits them, by name: the operand is the name's constant.

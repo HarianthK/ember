@@ -338,3 +338,51 @@ fn strings_compare_by_code_point() {
         "{e}"
     );
 }
+
+#[test]
+fn in_asks_whether_something_is_there() {
+    assert_eq!(
+        out(r#"print(2 in [1, 2, 3], 5 in [1, 2], "b" in ["a", "b"], 1 in [])"#),
+        ["true false true false"]
+    );
+    assert_eq!(
+        out(r#"let m = {"name": "ada"}
+print("name" in m, "born" in m)"#),
+        ["true false"]
+    );
+    assert_eq!(
+        out(r#"print("ell" in "hello", "xyz" in "hello", "" in "hello")"#),
+        ["true false true"]
+    );
+    // A list is found by identity, as == finds it; the same list inside is found.
+    assert_eq!(
+        out("let inner = [1]\nprint(inner in [inner], [1] in [[1]])"),
+        ["true false"]
+    );
+}
+
+#[test]
+fn in_binds_like_a_comparison() {
+    // Arithmetic first, then in, then and/or; and `for x in xs` is still a loop.
+    assert_eq!(
+        out("print(1 + 1 in [2], 3 in [3] and 4 in [5], not (2 in [1]))"),
+        ["true false true"]
+    );
+    assert_eq!(
+        out("let n = 0\nfor x in [1, 2] { if x in [2] { n = n + 1 } }\nprint(n)"),
+        ["1"]
+    );
+}
+
+#[test]
+fn in_says_what_it_needs() {
+    assert!(err(r#"print(1 in {"a": 1})"#).contains("map keys must be strings, not a number"));
+    assert!(
+        err(r#"print(1 in "abc")"#)
+            .contains("in a string needs a string to look for, not a number")
+    );
+    assert!(
+        err("print(1 in 5)")
+            .contains("in needs a list, a map or a string on its right, not a number")
+    );
+}
