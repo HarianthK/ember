@@ -150,3 +150,24 @@ print(slice(xs, 0, 10), slice(xs, -10, 2), slice(xs, 2, 1))"),
     assert!(err("slice([1])").contains("slice takes 2 or 3 arguments, but was given 1"));
     assert!(err("slice(5, 0)").contains("slice needs a list or a string, not a number"));
 }
+
+#[test]
+fn find_upper_and_lower_work_in_characters() {
+    assert_eq!(
+        out(r#"print(find("hello world", "o"), find("hello", "xyz"), find("abc", ""))"#),
+        ["4 -1 0"]
+    );
+    // Counted in characters, not bytes: the é is one position, so the answer slices correctly.
+    assert_eq!(
+        out(r#"let s = "héllo wörld"
+let at = find(s, "wörld")
+print(at, slice(s, at))"#),
+        ["6 wörld"]
+    );
+    assert_eq!(
+        out(r#"print(upper("Straße"), lower("ÉCOLE"), upper(""))"#),
+        ["STRASSE école "]
+    );
+    assert!(err(r#"find("a", 1)"#).contains("find needs a string to look for, not a number"));
+    assert!(err("upper(nil)").contains("upper needs a string, not a nil"));
+}

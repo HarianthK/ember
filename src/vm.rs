@@ -731,7 +731,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 15] = [
+const NATIVES: [Native; 18] = [
     Native {
         name: "print",
         arity: None,
@@ -807,7 +807,52 @@ const NATIVES: [Native; 15] = [
         arity: None,
         call: native_slice,
     },
+    Native {
+        name: "find",
+        arity: Some(2),
+        call: native_find,
+    },
+    Native {
+        name: "upper",
+        arity: Some(1),
+        call: native_upper,
+    },
+    Native {
+        name: "lower",
+        arity: Some(1),
+        call: native_lower,
+    },
 ];
+
+// Where part first occurs in s, counted in characters like indexing and slice, so the
+// answer can be passed straight back to them; -1 if it does not occur.
+fn native_find(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match (&args[0], &args[1]) {
+        (Value::Str(s), Value::Str(part)) => Ok(Value::Number(match s.find(part.as_str()) {
+            Some(byte) => s[..byte].chars().count() as f64,
+            None => -1.0,
+        })),
+        (Value::Str(_), other) => Err(format!(
+            "find needs a string to look for, not a {}",
+            other.type_name()
+        )),
+        (other, _) => Err(format!("find needs a string, not a {}", other.type_name())),
+    }
+}
+
+fn native_upper(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Str(s) => Ok(Value::Str(s.to_uppercase())),
+        other => Err(format!("upper needs a string, not a {}", other.type_name())),
+    }
+}
+
+fn native_lower(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Str(s) => Ok(Value::Str(s.to_lowercase())),
+        other => Err(format!("lower needs a string, not a {}", other.type_name())),
+    }
+}
 
 // slice(xs, start) or slice(xs, start, end): a new list or string, the end not included.
 // Negative positions count from the end, and unlike an index a slice is trimmed to fit
