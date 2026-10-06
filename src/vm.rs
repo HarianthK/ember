@@ -187,6 +187,22 @@ impl Vm {
         Ok(())
     }
 
+    // "; did you mean total?" for the closest defined global, if close enough by Python's rule:
+    // (both lengths + 3) / 6 edits, so nope is not taken for pop. Locals are not offered (DOCS.md).
+    fn did_you_mean(&self, slot: u16) -> String {
+        let wrong = &self.global_names[slot as usize];
+        let size = wrong.chars().count();
+        self.global_names
+            .iter()
+            .zip(&self.globals)
+            .filter(|(name, value)| value.is_some() && *name != wrong)
+            .map(|(name, _)| (edit_distance(wrong, name), name))
+            .filter(|&(d, name)| d <= (size + name.chars().count() + 3) / 6)
+            .min()
+            .map(|(_, name)| format!("; did you mean {name}?"))
+            .unwrap_or_default()
+    }
+
     // The slot for a global name, made the first time the name is seen, in any program.
     fn global_slot(&mut self, name: &str) -> u16 {
         if let Some(&slot) = self.global_slots.get(name) {
@@ -554,7 +570,11 @@ impl Vm {
                     Some(v) => self.stack.push(v.clone()),
                     None => {
                         return Err(Fault {
-                            message: format!("{} is not defined", self.global_names[slot as usize]),
+                            message: format!(
+                                "{} is not defined{}",
+                                self.global_names[slot as usize],
+                                self.did_you_mean(slot)
+                            ),
                             at,
                         });
                     }
@@ -570,10 +590,16 @@ impl Vm {
                         Some(current) => *current = value,
                         None => {
                             return Err(Fault {
-                                message: format!(
-                                    "{} is not defined; declare it with let first",
-                                    self.global_names[slot as usize]
-                                ),
+                                message: match self.did_you_mean(slot) {
+                                    hint if hint.is_empty() => format!(
+                                        "{} is not defined; declare it with let first",
+                                        self.global_names[slot as usize]
+                                    ),
+                                    hint => format!(
+                                        "{} is not defined{hint}",
+                                        self.global_names[slot as usize]
+                                    ),
+                                },
                                 at,
                             });
                         }
@@ -1158,4 +1184,22 @@ fn native_clock(_vm: &mut Vm, _args: &[Value]) -> Result<Value, String> {
     Ok(Value::Number(
         START.get_or_init(Instant::now).elapsed().as_secs_f64(),
     ))
+}
+
+// How many single-character insertions, deletions or swaps of one for another turn a into b.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let next = (diagonal + usize::from(ca != cb))
+                .min(row[j] + 1)
+                .min(row[j + 1] + 1);
+            diagonal = row[j + 1];
+            row[j + 1] = next;
+        }
+    }
+    row[b.len()]
 }

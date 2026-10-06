@@ -438,3 +438,27 @@ line can mislead. So every chunk now records its source, empty for the program
 and "prelude" for the library, and an error or a trace line from the prelude says
 so: "a number cannot be called at prelude line 6", "in map, prelude line 6", then
 "in script, line 2". Errors in the program read exactly as before.
+
+## Did you mean
+
+`totl = 5` now says "totl is not defined; did you mean total?". The candidates
+are the globals that exist at that moment, which includes the natives and the
+prelude, so `prnt` finds `print` and `fliter` finds `filter`. A global declared
+further down that has not run yet is not offered, because it does not exist yet.
+
+Closeness is edit distance, the number of single-character insertions,
+deletions and substitutions between two names. How close is close enough is
+borrowed from Python, which allows (both lengths + 3) / 6 edits. A fixed limit
+of two looked fine until `nope` suggested `pop`: two edits, and nothing anyone
+meant. Python's rule gives short names fewer edits, which is right, since two
+edits to a four-letter name leave little of it. When two names are equally
+close the alphabetically first wins, so the same mistake always gets the same
+message.
+
+Locals are not offered, and that is a real gap: a typo of a local inside a
+function is the most common case. A name that is not a local in scope compiles
+to a global lookup, and by the time that lookup fails at run time the locals
+are only stack slots; their names were left behind in the compiler. Offering
+them would mean the compiler recording which names were in scope at every
+global it emits.
+

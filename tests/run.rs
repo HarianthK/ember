@@ -129,6 +129,29 @@ totl = 5");
 }
 
 #[test]
+fn a_typo_suggests_the_name_it_was_probably_meant_to_be() {
+    let e = err("let total = 0\ntotl = 5");
+    assert!(
+        e.contains("totl is not defined; did you mean total?"),
+        "{e}"
+    );
+    // Natives and the prelude are globals too; a swapped pair of letters is two edits.
+    assert!(err("prnt(1)").contains("did you mean print?"));
+    assert!(err("fliter([1], str)").contains("did you mean filter?"));
+    // Nothing close, nothing offered, and assignment falls back to its own hint.
+    assert!(!err("print(zzz)").contains("did you mean"));
+    assert!(err("nope = 1").contains("nope is not defined; declare it with let first"));
+    // Short names get fewer edits: nope is two from pop, which is not what anyone meant.
+    assert!(!err("print(nope)").contains("did you mean"));
+    assert!(err("let ab = 1\nprint(ac)").contains("did you mean ab?"));
+    assert!(!err("let ab = 1\nprint(xy)").contains("did you mean"));
+    // Two equally close names: the first alphabetically, so the message never varies.
+    assert!(err("let cat = 1\nlet car = 2\nprint(caz)").contains("did you mean car?"));
+    // A global declared further down but not run yet does not exist, so is not offered.
+    assert!(!err("print(totl)\nlet total = 1").contains("did you mean"));
+}
+
+#[test]
 fn locals_live_in_blocks() {
     assert_eq!(
         out("{ let x = 5

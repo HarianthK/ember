@@ -72,7 +72,8 @@ Dynamically typed. Values are numbers (one float type), strings, booleans,
 variables around them, so `fn add(a, b) {}` is sugar for `let add = fn(a, b) {}`.
 Lists and maps are shared, not copied, as in Python. Map keys are strings, and
 `m.name` is sugar for `m["name"]`. A missing key or an undefined name is an
-error rather than a quiet `nil`. Semicolons are optional between statements, and
+error rather than a quiet `nil`, and a misspelt name suggests the one it was
+probably meant to be. Semicolons are optional between statements, and
 `and`, `or` and `not` are words, returning whichever operand decided, so
 `name or "default"` works. Loops are `while` and `for x in list`, with `break`
 and `continue`. A negative index counts from the end, so `xs[-1]` is the last
