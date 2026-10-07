@@ -187,16 +187,20 @@ impl Vm {
         Ok(())
     }
 
-    // "; did you mean total?" for the closest defined global, if close enough by Python's rule:
-    // (both lengths + 3) / 6 edits, so nope is not taken for pop. Locals are not offered (DOCS.md).
-    fn did_you_mean(&self, slot: u16) -> String {
+    // "; did you mean total?" for the closest local in scope or defined global, if close enough
+    // by Python's rule: (both lengths + 3) / 6 edits, so nope is not taken for pop.
+    fn did_you_mean(&self, slot: u16, locals: &[String]) -> String {
         let wrong = &self.global_names[slot as usize];
         let size = wrong.chars().count();
-        self.global_names
+        let globals = self.global_names.iter().zip(&self.globals);
+        let defined = globals
+            .filter(|(_, value)| value.is_some())
+            .map(|(name, _)| name);
+        locals
             .iter()
-            .zip(&self.globals)
-            .filter(|(name, value)| value.is_some() && *name != wrong)
-            .map(|(name, _)| (edit_distance(wrong, name), name))
+            .chain(defined)
+            .filter(|name| *name != wrong)
+            .map(|name| (edit_distance(wrong, name), name))
             .filter(|&(d, name)| d <= (size + name.chars().count() + 3) / 6)
             .min()
             .map(|(_, name)| format!("; did you mean {name}?"))
@@ -573,7 +577,7 @@ impl Vm {
                             message: format!(
                                 "{} is not defined{}",
                                 self.global_names[slot as usize],
-                                self.did_you_mean(slot)
+                                self.did_you_mean(slot, chunk.nearby_at(at))
                             ),
                             at,
                         });
@@ -590,7 +594,7 @@ impl Vm {
                         Some(current) => *current = value,
                         None => {
                             return Err(Fault {
-                                message: match self.did_you_mean(slot) {
+                                message: match self.did_you_mean(slot, chunk.nearby_at(at)) {
                                     hint if hint.is_empty() => format!(
                                         "{} is not defined; declare it with let first",
                                         self.global_names[slot as usize]

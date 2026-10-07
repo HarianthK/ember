@@ -175,6 +175,9 @@ pub struct Chunk {
     // Where the code came from, for errors: empty for the program being run, "prelude" for
     // the library every VM loads, so a line number is never mistaken for one in the program.
     pub source: &'static str,
+    // For each global lookup made where locals were in scope, its index and their names, so
+    // "did you mean" can offer a local; only read when the lookup fails.
+    pub nearby: Vec<(usize, Vec<String>)>,
 }
 
 impl Chunk {
@@ -186,6 +189,13 @@ impl Chunk {
         self.code.push(op);
         self.spans.push(at);
         self.code.len() - 1
+    }
+
+    pub fn nearby_at(&self, ip: usize) -> &[String] {
+        match self.nearby.binary_search_by_key(&ip, |(i, _)| *i) {
+            Ok(k) => &self.nearby[k].1,
+            Err(_) => &[],
+        }
     }
 
     // Constants are de-duplicated, so a loop mentioning the same number twice stores one.

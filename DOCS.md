@@ -455,10 +455,20 @@ edits to a four-letter name leave little of it. When two names are equally
 close the alphabetically first wins, so the same mistake always gets the same
 message.
 
-Locals are not offered, and that is a real gap: a typo of a local inside a
-function is the most common case. A name that is not a local in scope compiles
-to a global lookup, and by the time that lookup fails at run time the locals
-are only stack slots; their names were left behind in the compiler. Offering
-them would mean the compiler recording which names were in scope at every
-global it emits.
+Locals were not offered at first, and that was the biggest gap: a typo of a
+local inside a function is the most common case. A name that is not a local in
+scope compiles to a global lookup, and by the time that lookup fails at run time
+the locals are only stack slots; their names stayed behind in the compiler.
 
+So now the compiler writes them down. Beside every global lookup it emits while
+locals are in scope, the chunk keeps that instruction's index and the names of
+every local it could see: the function's own, a block's, a loop variable, and
+those of the functions around it, which a closure could reach. `link()` copies
+the chunk, so the list survives. The run loop never reads it; only an error
+does, by binary search on the failing instruction's index. A local that has
+gone out of scope is not on the list, so it is never offered.
+
+The cost is memory, not speed: a few names per global lookup inside a function.
+Lookups at the top level, outside any block, have no locals around them and
+record nothing, and those are most of a program's calls to `print` and the
+rest of the library.

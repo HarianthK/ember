@@ -152,6 +152,32 @@ fn a_typo_suggests_the_name_it_was_probably_meant_to_be() {
 }
 
 #[test]
+fn a_typo_of_a_local_suggests_the_local() {
+    // A parameter, a loop variable and a block's own local: all invisible at run time,
+    // where they are only stack slots, so the compiler has to have written them down.
+    let e = err("fn f(total) { return totl }\nf(1)");
+    assert!(
+        e.contains("totl is not defined; did you mean total?"),
+        "{e}"
+    );
+    assert!(err("for item in [1] { print(itm) }").contains("did you mean item?"));
+    assert!(err("{ let width = 1\nprint(widht) }").contains("did you mean width?"));
+    // A local of the function around this one is in reach too, through a closure.
+    let e = err(
+        "fn outer() {\n  let count = 1\n  fn inner() { return cuont }\n  return inner()\n}\nouter()",
+    );
+    assert!(e.contains("did you mean count?"), "{e}");
+    // Assigning to a misspelt local suggests it as well, instead of the let hint.
+    assert!(err("fn f() { let sum = 0\nsun = 1 }\nf()").contains("did you mean sum?"));
+    // Once its block has ended, a local is gone and is not offered.
+    assert!(!err("{ let width = 1 }\nprint(widht)").contains("did you mean"));
+    // A local beats nothing, but a closer global still wins over a farther local.
+    assert!(
+        err("let total = 0\nfn f(totals) { return totl }\nf(1)").contains("did you mean total?")
+    );
+}
+
+#[test]
 fn locals_live_in_blocks() {
     assert_eq!(
         out("{ let x = 5

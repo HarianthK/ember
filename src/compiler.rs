@@ -491,6 +491,21 @@ impl Compiler {
                 Op::GetUpvalue(i)
             });
         } else {
+            // Every local this code could have meant, in this function or around it; hidden
+            // ones start with a space and the script's own slot has no name, so both are left out.
+            let mut names: Vec<String> = self
+                .states
+                .iter()
+                .flat_map(|s| &s.locals)
+                .map(|l| l.name.clone())
+                .filter(|n| n.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+                .collect();
+            names.sort();
+            names.dedup();
+            if !names.is_empty() {
+                let at = self.st_ref().chunk.code.len();
+                self.st().chunk.nearby.push((at, names));
+            }
             let k = self.name_constant(name);
             self.emit(if set {
                 Op::SetGlobal(k)
