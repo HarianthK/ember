@@ -191,19 +191,12 @@ impl Vm {
     // by Python's rule: (both lengths + 3) / 6 edits, so nope is not taken for pop.
     fn did_you_mean(&self, slot: u16, locals: &[String]) -> String {
         let wrong = &self.global_names[slot as usize];
-        let size = wrong.chars().count();
         let globals = self.global_names.iter().zip(&self.globals);
         let defined = globals
             .filter(|(_, value)| value.is_some())
             .map(|(name, _)| name);
-        locals
-            .iter()
-            .chain(defined)
-            .filter(|name| *name != wrong)
-            .map(|name| (edit_distance(wrong, name), name))
-            .filter(|&(d, name)| d <= (size + name.chars().count() + 3) / 6)
-            .min()
-            .map(|(_, name)| format!("; did you mean {name}?"))
+        closest(wrong, locals.iter().chain(defined))
+            .map(|name| format!("; did you mean {name}?"))
             .unwrap_or_default()
     }
 
@@ -694,8 +687,12 @@ impl Vm {
                             match self.heap.map(*r).get(&key) {
                                 Some(v) => v.clone(),
                                 None => {
+                                    let map = self.heap.map(*r);
+                                    let hint = closest(&key, map.keys())
+                                        .map(|k| format!("; did you mean {k:?}?"))
+                                        .unwrap_or_default();
                                     return Err(Fault {
-                                        message: format!("the map has no key {key:?}"),
+                                        message: format!("the map has no key {key:?}{hint}"),
                                         at,
                                     });
                                 }
@@ -1188,6 +1185,18 @@ fn native_clock(_vm: &mut Vm, _args: &[Value]) -> Result<Value, String> {
     Ok(Value::Number(
         START.get_or_init(Instant::now).elapsed().as_secs_f64(),
     ))
+}
+
+// The candidate nearest to wrong, if within Python's (both lengths + 3) / 6 edits; the first
+// alphabetically on a tie, so the same mistake always gets the same answer.
+fn closest<'a>(wrong: &str, candidates: impl Iterator<Item = &'a String>) -> Option<&'a String> {
+    let size = wrong.chars().count();
+    candidates
+        .filter(|name| *name != wrong)
+        .map(|name| (edit_distance(wrong, name), name))
+        .filter(|&(d, name)| d <= (size + name.chars().count() + 3) / 6)
+        .min()
+        .map(|(_, name)| name)
 }
 
 // How many single-character insertions, deletions or swaps of one for another turn a into b.

@@ -99,6 +99,21 @@ print(acct.balance)"#;
 }
 
 #[test]
+fn a_misspelt_key_suggests_the_key_that_is_there() {
+    let e = err("let person = {\"name\": \"ada\", \"born\": 1815}\nprint(person.nme)");
+    assert!(
+        e.contains(r#"the map has no key "nme"; did you mean "name"?"#),
+        "{e}"
+    );
+    // Brackets go through the same lookup as the dot.
+    assert!(
+        err("let m = {\"colour\": 1}\nprint(m[\"color\"])").contains(r#"did you mean "colour"?"#)
+    );
+    // Nothing close, nothing offered.
+    assert!(!err("let m = {\"name\": 1}\nprint(m.age)").contains("did you mean"));
+}
+
+#[test]
 fn map_mistakes_say_what_went_wrong() {
     let e = err("let m = {\"a\": 1}\nprint(m.b)");
     assert!(e.contains(r#"the map has no key "b" at line 2"#), "{e}");

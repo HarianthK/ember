@@ -472,3 +472,10 @@ The cost is memory, not speed: a few names per global lookup inside a function.
 Lookups at the top level, outside any block, have no locals around them and
 record nothing, and those are most of a program's calls to `print` and the
 rest of the library.
+
+A missing map key now gets the same treatment: `person.nme` says the map has
+no key "nme" and asks whether "name" was meant. The candidates are the map's
+own keys, and the rule and the tie-break are the same, shared by both errors,
+so a variable and a key are judged alike. A swap of two letters, `nmae`, is two
+edits, and four-letter names only get one; Python's own suggestions have the
+same blind spot, and loosening it would bring back `nope` suggesting `pop`.
