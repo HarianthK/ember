@@ -817,7 +817,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 18] = [
+const NATIVES: [Native; 21] = [
     Native {
         name: "print",
         arity: None,
@@ -887,6 +887,21 @@ const NATIVES: [Native; 18] = [
         name: "sort",
         arity: Some(1),
         call: native_sort,
+    },
+    Native {
+        name: "min",
+        arity: None,
+        call: native_min,
+    },
+    Native {
+        name: "max",
+        arity: None,
+        call: native_max,
+    },
+    Native {
+        name: "abs",
+        arity: Some(1),
+        call: native_abs,
     },
     Native {
         name: "slice",
@@ -1007,6 +1022,50 @@ fn native_sort(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
         return Err("sort needs a list of all numbers or all strings".into());
     }
     Ok(Value::Nil)
+}
+
+fn native_min(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    extreme(vm, "min", args, Ordering::Less)
+}
+
+fn native_max(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    extreme(vm, "max", args, Ordering::Greater)
+}
+
+// min and max take one list, or two or more values, as in Python; all numbers or all
+// strings, as sort needs. On a tie the first one wins.
+fn extreme(vm: &Vm, name: &str, args: &[Value], pick: Ordering) -> Result<Value, String> {
+    let items: &[Value] = match args {
+        [Value::List(r)] => vm.heap.list(*r),
+        [one] => {
+            return Err(format!(
+                "{name} needs a list, or two or more values, not a {}",
+                one.type_name()
+            ));
+        }
+        _ => args,
+    };
+    let Some(mut best) = items.first() else {
+        return Err(format!("{name} needs at least one value"));
+    };
+    for v in items {
+        let order = match (v, best) {
+            (Value::Number(a), Value::Number(b)) => a.total_cmp(b),
+            (Value::Str(a), Value::Str(b)) => a.cmp(b),
+            _ => return Err(format!("{name} needs all numbers or all strings")),
+        };
+        if order == pick {
+            best = v;
+        }
+    }
+    Ok(best.clone())
+}
+
+fn native_abs(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match &args[0] {
+        Value::Number(n) => Ok(Value::Number(n.abs())),
+        other => Err(format!("abs needs a number, not a {}", other.type_name())),
+    }
 }
 
 // Any value as text, exactly as print would show it.

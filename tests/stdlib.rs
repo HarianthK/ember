@@ -213,3 +213,29 @@ map(xs, 5)");
         "{e}"
     );
 }
+
+#[test]
+fn min_and_max_take_a_list_or_several_values() {
+    assert_eq!(
+        out("print(min([3, -1, 2]), max([3, -1, 2]), min(4, 2, 8), max(4, 2, 8))"),
+        ["-1 3 2 8"]
+    );
+    // Strings by code point, as sort orders them; a single item is its own answer.
+    assert_eq!(
+        out(r#"print(min("pear", "apple"), max(["b", "a", "c"]), min([7]))"#),
+        ["apple c 7"]
+    );
+    // The list is read, not changed.
+    assert_eq!(out("let xs = [2, 1]\nmax(xs)\nprint(xs)"), ["[2, 1]"]);
+    assert!(err("min([])").contains("min needs at least one value"));
+    assert!(err("max()").contains("max needs at least one value"));
+    assert!(err("min(5)").contains("min needs a list, or two or more values, not a number"));
+    assert!(err(r#"max([1, "a"])"#).contains("max needs all numbers or all strings"));
+    assert!(err("min([nil])").contains("min needs all numbers or all strings"));
+}
+
+#[test]
+fn abs_drops_the_sign() {
+    assert_eq!(out("print(abs(-3), abs(2.5), abs(0))"), ["3 2.5 0"]);
+    assert!(err(r#"abs("-1")"#).contains("abs needs a number, not a string"));
+}

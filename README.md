@@ -81,7 +81,7 @@ item, and strings compare with `<` and `>` by Unicode code point. `for` walks
 a list, a string, or a map's keys in sorted order. `x in xs` asks whether
 `x` is in a list, among a map's keys, or inside a string.
 
-Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `slice`, `find`, `upper`, `lower`, `keys`, `has`, `range`,
+Built in: `print`, `str`, `num`, `len`, `push`, `pop`, `sort`, `min`, `max`, `abs`, `slice`, `find`, `upper`, `lower`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`, written in Rust; and `map`, `filter` and
 `reduce`, written in ember itself, in [src/prelude.em](src/prelude.em).
 
