@@ -187,6 +187,55 @@ impl Vm {
         Ok(())
     }
 
+    // "ab" * 3 or [0] * 64, either way round, as in Python; a new value, the original untouched.
+    fn repeat(&mut self, a: Value, b: Value, at: usize) -> Result<Value, Fault> {
+        let fault = |message: String| Fault { message, at };
+        let (thing, times) = match (a, b) {
+            (Value::Number(n), thing) | (thing, Value::Number(n))
+                if matches!(thing, Value::Str(_) | Value::List(_)) =>
+            {
+                (thing, n)
+            }
+            (a, b) => {
+                return Err(fault(format!(
+                    "* needs two numbers, or a string or list and a whole number, not a {} and a {}",
+                    a.type_name(),
+                    b.type_name()
+                )));
+            }
+        };
+        if times.fract() != 0.0 || times < 0.0 {
+            return Err(fault(format!(
+                "a {} can only be repeated a whole number of times, not {times}",
+                thing.type_name()
+            )));
+        }
+        let size = match &thing {
+            Value::Str(s) => s.len(),
+            Value::List(r) => self.heap.list(*r).len(),
+            _ => unreachable!("checked above"),
+        };
+        // Refused rather than attempted: [0] * 1e12 would run the machine out of memory.
+        if size as f64 * times > 100_000_000.0 {
+            return Err(fault(format!(
+                "repeating that {times} times would make something too long"
+            )));
+        }
+        let times = times as usize;
+        Ok(match thing {
+            Value::Str(s) => Value::Str(s.repeat(times)),
+            Value::List(r) => {
+                let items = self.heap.list(r);
+                let mut out = Vec::with_capacity(items.len() * times);
+                for _ in 0..times {
+                    out.extend(items.iter().cloned());
+                }
+                self.new_list(out)
+            }
+            _ => unreachable!("checked above"),
+        })
+    }
+
     // "; did you mean total?" for the closest local in scope or defined global, if close enough
     // by Python's rule: (both lengths + 3) / 6 edits, so nope is not taken for pop.
     fn did_you_mean(&self, slot: u16, locals: &[String]) -> String {
@@ -394,7 +443,20 @@ impl Vm {
                     self.stack.push(result);
                 }
                 Op::Sub => self.arith("-", at, |x, y| Ok(Value::Number(x - y)))?,
-                Op::Mul => self.arith("*", at, |x, y| Ok(Value::Number(x * y)))?,
+                Op::Mul
+                    if matches!(
+                        self.stack.as_slice(),
+                        [.., Value::Number(_), Value::Number(_)]
+                    ) =>
+                {
+                    self.arith("*", at, |x, y| Ok(Value::Number(x * y)))?
+                }
+                Op::Mul => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    let result = self.repeat(a, b, at)?;
+                    self.stack.push(result);
+                }
                 // Dividing by zero is an error rather than infinity, which is what people expect.
                 Op::Div => self.arith("/", at, |x, y| {
                     if y == 0.0 {

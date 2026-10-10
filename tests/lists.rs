@@ -169,3 +169,35 @@ print(xs)"),
     // An empty list has nothing at -1 either.
     assert!(err("print([][-1])").contains("index -1 is out of range for a list of length 0"));
 }
+
+#[test]
+fn star_repeats_a_list_or_a_string() {
+    assert_eq!(
+        out(r#"print([0] * 3, 2 * [1, 2], "ab" * 3, 3 * "-", [9] * 0, "x" * 0)"#),
+        [r#"[0, 0, 0] [1, 2, 1, 2] ababab --- [] "#]
+    );
+    // A new list each time: changing the copy leaves the original as it was.
+    assert_eq!(
+        out("let a = [1, 2]\nlet b = a * 2\nb[0] = 9\nprint(a, b)"),
+        ["[1, 2] [9, 2, 1, 2]"]
+    );
+    // As in Python, the items themselves are shared, not copied: one inner list, three times.
+    assert_eq!(
+        out("let grid = [[0]] * 3\npush(grid[0], 1)\nprint(grid)"),
+        ["[[0, 1], [0, 1], [0, 1]]"]
+    );
+    // Numbers still multiply, and the mistakes say what was wrong.
+    assert_eq!(out("print(6 * 7)"), ["42"]);
+    assert!(
+        err("[1] * 1.5").contains("a list can only be repeated a whole number of times, not 1.5")
+    );
+    assert!(
+        err(r#""a" * -1"#)
+            .contains("a string can only be repeated a whole number of times, not -1")
+    );
+    assert!(
+        err(r#""a" * "b""#).contains("* needs two numbers, or a string or list and a whole number")
+    );
+    assert!(err("[1] * [2]").contains("* needs two numbers, or a string or list"));
+    assert!(err("[0] * 1000000000000").contains("too long"));
+}

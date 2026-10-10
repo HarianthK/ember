@@ -479,3 +479,22 @@ own keys, and the rule and the tie-break are the same, shared by both errors,
 so a variable and a key are judged alike. A swap of two letters, `nmae`, is two
 edits, and four-letter names only get one; Python's own suggestions have the
 same blind spot, and loosening it would bring back `nope` suggesting `pop`.
+
+## Repeating with `*`
+
+`"ab" * 3` and `[0] * 64` now work, either way round, as in Python, and make a
+new value without touching the original. Two choices differ from Python. A
+negative or fractional count is an error, where Python quietly gives an empty
+string for `"ab" * -1`; ember already refuses a quiet `nil` for a missing key,
+and this is the same idea. And a result over a hundred million items or bytes
+is refused before it is attempted, since `[0] * 1e12` would otherwise run the
+machine out of memory rather than report anything.
+
+One Python behaviour is kept on purpose, because changing it would surprise
+anyone who knows Python: `[[0]] * 3` is three references to the same inner
+list, so pushing to one changes all three. The test pins that down.
+
+Numbers keep their fast path, the same in-place arithmetic as before, with the
+repeat only reached when the two operands are not both numbers. A loop of two
+million multiplications took 190.3 ms before and 189.4 ms after.
+

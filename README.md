@@ -76,7 +76,8 @@ error rather than a quiet `nil`, and a misspelt name suggests the one it was
 probably meant to be. Semicolons are optional between statements, and
 `and`, `or` and `not` are words, returning whichever operand decided, so
 `name or "default"` works. Loops are `while` and `for x in list`, with `break`
-and `continue`. A negative index counts from the end, so `xs[-1]` is the last
+and `continue`. `*` repeats a string or a list, so `[0] * 64` makes a list of
+zeros. A negative index counts from the end, so `xs[-1]` is the last
 item, and strings compare with `<` and `>` by Unicode code point. `for` walks
 a list, a string, or a map's keys in sorted order. `x in xs` asks whether
 `x` is in a list, among a map's keys, or inside a string.
