@@ -106,6 +106,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     For {
+        // for i, x in xs: the position as well as the item.
+        index: Option<String>,
         name: String,
         iter: Expr,
         body: Vec<Stmt>,

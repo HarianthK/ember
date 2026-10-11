@@ -183,11 +183,17 @@ impl Parser {
             Tok::For => {
                 let at = self.at();
                 self.advance();
-                let name = self.name()?;
+                let first = self.name()?;
+                let (index, name) = if self.eat(&Tok::Comma) {
+                    (Some(first), self.name()?)
+                } else {
+                    (None, first)
+                };
                 self.expect(Tok::In)?;
                 let iter = self.expression()?;
                 let body = self.block()?;
                 Ok(Stmt::For {
+                    index,
                     name,
                     iter,
                     body,

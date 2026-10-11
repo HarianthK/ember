@@ -201,3 +201,35 @@ fn star_repeats_a_list_or_a_string() {
     assert!(err("[1] * [2]").contains("* needs two numbers, or a string or list"));
     assert!(err("[0] * 1000000000000").contains("too long"));
 }
+
+#[test]
+fn for_can_give_the_index_as_well_as_the_item() {
+    assert_eq!(
+        out(r#"for i, x in ["a", "b"] { print(i, x) }"#),
+        ["0 a", "1 b"]
+    );
+    // Map keys come in sorted order, a string by character, as plain for already does.
+    assert_eq!(
+        out(r#"for i, k in {"y": 1, "x": 2} { print(i, k) }
+for i, c in "hé" { print(i, c) }"#),
+        ["0 x", "1 y", "0 h", "1 é"]
+    );
+    // The index is a copy: changing it in the body does not move the loop along.
+    assert_eq!(
+        out("let seen = []\nfor i, x in [1, 2, 3] { i = 10\npush(seen, x) }\nprint(seen)"),
+        ["[1, 2, 3]"]
+    );
+    // Each pass has its own index, so closures made in the body keep the one they saw.
+    assert_eq!(
+        out(r#"let fs = []
+for i, x in ["a", "b"] { push(fs, fn() { return i }) }
+print(fs[0](), fs[1]())"#),
+        ["0 1"]
+    );
+    assert_eq!(
+        out("for i, x in [5, 6, 7] { if i == 1 { continue }\nprint(i, x) }"),
+        ["0 5", "2 7"]
+    );
+    assert!(err("for i, x in [1] {}\nprint(i)").contains("i is not defined"));
+    assert!(err("for x, x in [1] {}").contains("the loop names x twice"));
+}

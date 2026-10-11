@@ -216,12 +216,19 @@ impl Compiler {
     // space, which no name in a program can, so the loop cannot be interfered with.
     fn for_loop(
         &mut self,
+        index: Option<&str>,
         name: &str,
         iter: &Expr,
         body: &[Stmt],
         at: Span,
     ) -> Result<(), CompileError> {
         self.at = at;
+        if index == Some(name) {
+            return Err(CompileError {
+                message: format!("the loop names {name} twice"),
+                at,
+            });
+        }
         self.st().depth += 1;
         self.expr(iter)?;
         self.at = at;
@@ -239,6 +246,12 @@ impl Compiler {
         self.emit(Op::Pop);
         // A fresh scope each pass, so a closure made in the body captures that pass's item.
         self.st().depth += 1;
+        // The index is a copy of the hidden counter, so the body can change it, or a closure
+        // keep it, without moving the loop along.
+        if let Some(index) = index {
+            self.emit(Op::GetLocal(i));
+            self.declare(index);
+        }
         self.emit(Op::GetLocal(seq));
         self.emit(Op::GetLocal(i));
         self.emit(Op::GetIndex);
@@ -339,11 +352,12 @@ impl Compiler {
                 self.emit(Op::Return);
             }
             Stmt::For {
+                index,
                 name,
                 iter,
                 body,
                 at,
-            } => self.for_loop(name, iter, body, *at)?,
+            } => self.for_loop(index.as_deref(), name, iter, body, *at)?,
             Stmt::If {
                 cond,
                 then,
