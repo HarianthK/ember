@@ -239,3 +239,27 @@ fn abs_drops_the_sign() {
     assert_eq!(out("print(abs(-3), abs(2.5), abs(0))"), ["3 2.5 0"]);
     assert!(err(r#"abs("-1")"#).contains("abs needs a number, not a string"));
 }
+
+#[test]
+fn format_fills_each_place_with_the_next_value() {
+    assert_eq!(
+        out(r#"print(format("{} + {} = {}", 1, 2, 1 + 2))"#),
+        ["1 + 2 = 3"]
+    );
+    // Each value is shown exactly as str shows it: a string bare, a list with quoted strings.
+    assert_eq!(
+        out(r#"print(format("{}: {} {}", "items", [1, "a"], nil))"#),
+        [r#"items: [1, "a"] nil"#]
+    );
+    // Doubled braces are the braces themselves, and a template with no places is just itself.
+    assert_eq!(
+        out(r#"print(format("{{}} {{{}}}", 7), format("plain"))"#),
+        ["{} {7} plain"]
+    );
+    assert!(err(r#"format("{} and {}", 1)"#).contains("more {} places than the 1 values"));
+    assert!(err(r#"format("{}", 1, 2)"#).contains("given 2 values but has only 1 {} places"));
+    assert!(err(r#"format("a { b", 1)"#).contains("lone {"));
+    assert!(err(r#"format("}", 1)"#).contains("lone }"));
+    assert!(err("format(5)").contains("format needs a string to fill in, not a number"));
+    assert!(err("format()").contains("format needs a string to fill in"));
+}

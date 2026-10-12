@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 21] = [
+const NATIVES: [Native; 22] = [
     Native {
         name: "print",
         arity: None,
@@ -914,6 +914,11 @@ const NATIVES: [Native; 21] = [
         name: "str",
         arity: Some(1),
         call: native_str,
+    },
+    Native {
+        name: "format",
+        arity: None,
+        call: native_format,
     },
     Native {
         name: "num",
@@ -1133,6 +1138,55 @@ fn native_abs(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 // Any value as text, exactly as print would show it.
 fn native_str(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     Ok(Value::Str(vm.heap.show(&args[0])))
+}
+
+// format("{} of {}", 3, 10): each {} takes the next value, shown as str shows it; {{ and }}
+// are braces themselves, as in Python. Places and values must match exactly.
+fn native_format(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let Some(Value::Str(template)) = args.first() else {
+        return Err(match args.first() {
+            None => "format needs a string to fill in".into(),
+            Some(other) => format!(
+                "format needs a string to fill in, not a {}",
+                other.type_name()
+            ),
+        });
+    };
+    let mut values = args[1..].iter();
+    let (mut out, mut used) = (String::new(), 0);
+    let mut chars = template.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, chars.peek()) {
+            ('{', Some('{')) | ('}', Some('}')) => {
+                chars.next();
+                out.push(c);
+            }
+            ('{', Some('}')) => {
+                chars.next();
+                let Some(v) = values.next() else {
+                    return Err(format!(
+                        "format has more {{}} places than the {} values it was given",
+                        args.len() - 1
+                    ));
+                };
+                out.push_str(&vm.heap.show(v));
+                used += 1;
+            }
+            ('{' | '}', _) => {
+                return Err(format!(
+                    "format found a lone {c}; write {{}} for a value, or {c}{c} for the brace itself"
+                ));
+            }
+            _ => out.push(c),
+        }
+    }
+    if used < args.len() - 1 {
+        return Err(format!(
+            "format was given {} values but has only {used} {{}} places",
+            args.len() - 1
+        ));
+    }
+    Ok(Value::Str(out))
 }
 
 fn native_num(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
