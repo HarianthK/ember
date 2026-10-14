@@ -263,3 +263,37 @@ fn format_fills_each_place_with_the_next_value() {
     assert!(err("format(5)").contains("format needs a string to fill in, not a number"));
     assert!(err("format()").contains("format needs a string to fill in"));
 }
+
+#[test]
+fn sort_by_orders_by_a_key_and_keeps_ties_in_order() {
+    let src = r#"let people = [{"name": "cy", "age": 30}, {"name": "al", "age": 25}, {"name": "bo", "age": 30}]
+let names = fn(ps) { return map(ps, fn(p) { return p.name }) }
+print(names(sort_by(people, fn(p) { return p.age })))
+print(names(sort_by(sort_by(people, fn(p) { return p.name }), fn(p) { return p.age })))
+print(names(people))"#;
+    // Ties keep their order, so sorting by name and then by age sorts by both; the input is untouched.
+    assert_eq!(
+        out(src),
+        [
+            r#"["al", "cy", "bo"]"#,
+            r#"["al", "bo", "cy"]"#,
+            r#"["cy", "al", "bo"]"#
+        ]
+    );
+    assert_eq!(
+        out(
+            r#"print(sort_by(["pear", "fig", "apple"], len), sort_by([3, 1, 2], fn(x) { return -x }), sort_by([], len), sort_by("cab", upper))"#
+        ),
+        [r#"["fig", "pear", "apple"] [3, 2, 1] [] ["a", "b", "c"]"#]
+    );
+    // A hundred and one numbers in a scrambled order come out exactly as the native sort puts them.
+    let src = "let xs = map(range(101), fn(i) { return (i * 37) % 101 })
+let ys = slice(xs, 0)
+sort(ys)
+print(str(sort_by(xs, fn(x) { return x })) == str(ys))";
+    assert_eq!(out(src), ["true"]);
+    // Keys compare as < does, so a mix of numbers and strings is the same error < gives.
+    let e = err(r#"sort_by([1, "a"], fn(x) { return x })"#);
+    assert!(e.contains("< needs two numbers or two strings"), "{e}");
+    assert!(e.contains("in sort_by, prelude line"), "{e}");
+}
