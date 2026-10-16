@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 22] = [
+const NATIVES: [Native; 23] = [
     Native {
         name: "print",
         arity: None,
@@ -969,6 +969,11 @@ const NATIVES: [Native; 22] = [
         name: "abs",
         arity: Some(1),
         call: native_abs,
+    },
+    Native {
+        name: "round",
+        arity: None,
+        call: native_round,
     },
     Native {
         name: "slice",
@@ -1281,6 +1286,33 @@ fn native_split(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 }
 
 // Every number is a float, so whole-number division is floor(a / b).
+// round(x) to a whole number, round(x, 2) to two places, round(x, -2) to hundreds. Halves go away
+// from zero; scaling is in floating point as in JavaScript, so round(2.675, 2) is 2.68 (Python: 2.67).
+fn native_round(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let (x, places) = match args {
+        [x] => (x, 0),
+        [x, Value::Number(p)] if p.fract() == 0.0 && p.abs() <= 15.0 => (x, *p as i32),
+        [_, other] => {
+            return Err(format!(
+                "round needs a whole number of places from -15 to 15, not {}",
+                vm.heap.show(other)
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "round takes 1 or 2 arguments, but was given {}",
+                args.len()
+            ));
+        }
+    };
+    let Value::Number(x) = x else {
+        return Err(format!("round needs a number, not a {}", x.type_name()));
+    };
+    let scale = 10f64.powi(places);
+    // Adding 0.0 turns -0 into 0, so round(-0.4) prints as 0, not -0.
+    Ok(Value::Number((x * scale).round() / scale + 0.0))
+}
+
 fn native_floor(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
         Value::Number(n) => Ok(Value::Number(n.floor())),

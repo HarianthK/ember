@@ -297,3 +297,24 @@ print(str(sort_by(xs, fn(x) { return x })) == str(ys))";
     assert!(e.contains("< needs two numbers or two strings"), "{e}");
     assert!(e.contains("in sort_by, prelude line"), "{e}");
 }
+
+#[test]
+fn round_goes_to_whole_numbers_or_to_places() {
+    assert_eq!(
+        out("print(round(2.5), round(-2.5), round(2.4), round(7), round(-0.4))"),
+        ["3 -3 2 7 0"]
+    );
+    assert_eq!(
+        out("print(round(3.14159, 2), round(3.14159, 0), round(1234, -2), round(1250, -2))"),
+        ["3.14 3 1200 1300"]
+    );
+    // Scaled in floating point, as JavaScript does it: 2.675 * 100 lands on 267.5 exactly.
+    assert_eq!(out("print(round(2.675, 2))"), ["2.68"]);
+    assert!(err("round()").contains("round takes 1 or 2 arguments, but was given 0"));
+    assert!(
+        err("round(1.5, 0.5)")
+            .contains("round needs a whole number of places from -15 to 15, not 0.5")
+    );
+    assert!(err("round(1.5, 16)").contains("from -15 to 15, not 16"));
+    assert!(err(r#"round("3")"#).contains("round needs a number, not a string"));
+}
