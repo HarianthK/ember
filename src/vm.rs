@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 23] = [
+const NATIVES: [Native; 24] = [
     Native {
         name: "print",
         arity: None,
@@ -954,6 +954,11 @@ const NATIVES: [Native; 23] = [
         name: "sort",
         arity: Some(1),
         call: native_sort,
+    },
+    Native {
+        name: "reverse",
+        arity: Some(1),
+        call: native_reverse,
     },
     Native {
         name: "min",
@@ -1074,6 +1079,18 @@ fn native_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 
 // Sorts the list itself, as push changes it: numbers ascending, or strings by code point,
 // the order < uses. A mix is an error rather than a guess at which order was meant.
+// Turns the list itself around and returns nil, as sort does, so every name for it sees the change.
+fn native_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let Value::List(r) = &args[0] else {
+        return Err(format!(
+            "reverse needs a list, not a {}",
+            args[0].type_name()
+        ));
+    };
+    vm.heap.list_mut(*r).reverse();
+    Ok(Value::Nil)
+}
+
 fn native_sort(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     let Value::List(r) = &args[0] else {
         return Err(format!("sort needs a list, not a {}", args[0].type_name()));

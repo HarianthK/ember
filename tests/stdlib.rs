@@ -318,3 +318,13 @@ fn round_goes_to_whole_numbers_or_to_places() {
     assert!(err("round(1.5, 16)").contains("from -15 to 15, not 16"));
     assert!(err(r#"round("3")"#).contains("round needs a number, not a string"));
 }
+
+#[test]
+fn reverse_turns_the_list_itself_around() {
+    // In place, like sort: another name for the list sees it reversed, and it returns nil.
+    assert_eq!(
+        out("let a = [1, 2, 3]\nlet b = a\nprint(reverse(a), b)\nlet e = []\nreverse(e)\nprint(e)"),
+        ["nil [3, 2, 1]", "[]"]
+    );
+    assert!(err(r#"reverse("abc")"#).contains("reverse needs a list, not a string"));
+}
