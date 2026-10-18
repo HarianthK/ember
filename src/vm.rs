@@ -1004,8 +1004,16 @@ const NATIVES: [Native; 24] = [
 
 // Where part first occurs in s, counted in characters like indexing and slice, so the
 // answer can be passed straight back to them; -1 if it does not occur.
-fn native_find(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+fn native_find(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match (&args[0], &args[1]) {
+        // In a list, the first item equal to it by ==, the same test in uses; -1 if none is.
+        (Value::List(r), item) => Ok(Value::Number(
+            vm.heap
+                .list(*r)
+                .iter()
+                .position(|v| v == item)
+                .map_or(-1.0, |i| i as f64),
+        )),
         (Value::Str(s), Value::Str(part)) => Ok(Value::Number(match s.find(part.as_str()) {
             Some(byte) => s[..byte].chars().count() as f64,
             None => -1.0,
@@ -1014,7 +1022,10 @@ fn native_find(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
             "find needs a string to look for, not a {}",
             other.type_name()
         )),
-        (other, _) => Err(format!("find needs a string, not a {}", other.type_name())),
+        (other, _) => Err(format!(
+            "find needs a string or a list, not a {}",
+            other.type_name()
+        )),
     }
 }
 

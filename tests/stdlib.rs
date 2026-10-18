@@ -328,3 +328,14 @@ fn reverse_turns_the_list_itself_around() {
     );
     assert!(err(r#"reverse("abc")"#).contains("reverse needs a list, not a string"));
 }
+
+#[test]
+fn find_also_looks_through_a_list() {
+    // The first equal item, by ==, as in; lists inside compare as == does, by identity.
+    assert_eq!(
+        out(r#"let inner = [1]
+print(find([5, 7, 5], 5), find(["a", "b"], "b"), find([1, 2], 3), find([], 1), find([inner], inner), find([[1]], [1]))"#),
+        ["0 1 -1 -1 0 -1"]
+    );
+    assert!(err("find(5, 1)").contains("find needs a string or a list, not a number"));
+}
