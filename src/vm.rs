@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 24] = [
+const NATIVES: [Native; 25] = [
     Native {
         name: "print",
         arity: None,
@@ -979,6 +979,11 @@ const NATIVES: [Native; 24] = [
         name: "round",
         arity: None,
         call: native_round,
+    },
+    Native {
+        name: "sum",
+        arity: Some(1),
+        call: native_sum,
     },
     Native {
         name: "slice",
@@ -1159,6 +1164,26 @@ fn extreme(vm: &Vm, name: &str, args: &[Value], pick: Ordering) -> Result<Value,
         }
     }
     Ok(best.clone())
+}
+
+// The total of a list of numbers, 0 for an empty one; anything else in it is an error, not skipped.
+fn native_sum(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    let Value::List(r) = &args[0] else {
+        return Err(format!("sum needs a list, not a {}", args[0].type_name()));
+    };
+    let mut total = 0.0;
+    for v in vm.heap.list(*r) {
+        match v {
+            Value::Number(n) => total += n,
+            other => {
+                return Err(format!(
+                    "sum needs a list of numbers, not one with a {} in it",
+                    other.type_name()
+                ));
+            }
+        }
+    }
+    Ok(Value::Number(total))
 }
 
 fn native_abs(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {

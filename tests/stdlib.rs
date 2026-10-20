@@ -339,3 +339,16 @@ print(find([5, 7, 5], 5), find(["a", "b"], "b"), find([1, 2], 3), find([], 1), f
     );
     assert!(err("find(5, 1)").contains("find needs a string or a list, not a number"));
 }
+
+#[test]
+fn sum_adds_up_a_list_of_numbers() {
+    assert_eq!(
+        out("print(sum([1, 2, 3.5]), sum([]), sum(range(101)))"),
+        ["6.5 0 5050"]
+    );
+    assert!(
+        err(r#"sum([1, "2"])"#)
+            .contains("sum needs a list of numbers, not one with a string in it")
+    );
+    assert!(err("sum(5)").contains("sum needs a list, not a number"));
+}
