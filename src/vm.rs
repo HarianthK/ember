@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 25] = [
+const NATIVES: [Native; 27] = [
     Native {
         name: "print",
         arity: None,
@@ -996,6 +996,16 @@ const NATIVES: [Native; 25] = [
         call: native_find,
     },
     Native {
+        name: "startswith",
+        arity: Some(2),
+        call: native_startswith,
+    },
+    Native {
+        name: "endswith",
+        arity: Some(2),
+        call: native_endswith,
+    },
+    Native {
         name: "upper",
         arity: Some(1),
         call: native_upper,
@@ -1029,6 +1039,29 @@ fn native_find(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
         )),
         (other, _) => Err(format!(
             "find needs a string or a list, not a {}",
+            other.type_name()
+        )),
+    }
+}
+
+fn native_startswith(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    affix("startswith", args, |s, p| s.starts_with(p))
+}
+
+fn native_endswith(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    affix("endswith", args, |s, p| s.ends_with(p))
+}
+
+// startswith and endswith: both arguments must be strings; the empty string starts and ends everything.
+fn affix(name: &str, args: &[Value], test: fn(&str, &str) -> bool) -> Result<Value, String> {
+    match (&args[0], &args[1]) {
+        (Value::Str(s), Value::Str(p)) => Ok(Value::Bool(test(s, p))),
+        (Value::Str(_), other) => Err(format!(
+            "{name} needs a string to look for, not a {}",
+            other.type_name()
+        )),
+        (other, _) => Err(format!(
+            "{name} needs a string, not a {}",
             other.type_name()
         )),
     }

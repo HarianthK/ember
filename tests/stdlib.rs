@@ -352,3 +352,18 @@ fn sum_adds_up_a_list_of_numbers() {
     );
     assert!(err("sum(5)").contains("sum needs a list, not a number"));
 }
+
+#[test]
+fn startswith_and_endswith_compare_the_ends_of_a_string() {
+    assert_eq!(
+        out(
+            r#"print(startswith("héllo", "hé"), startswith("hello", "lo"), endswith("hello", "lo"), endswith("hi", "high"), startswith("x", ""))"#
+        ),
+        ["true false true false true"]
+    );
+    assert!(
+        err(r#"startswith("a", 1)"#)
+            .contains("startswith needs a string to look for, not a number")
+    );
+    assert!(err("endswith(5, \"a\")").contains("endswith needs a string, not a number"));
+}
