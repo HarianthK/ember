@@ -152,6 +152,28 @@ print(slice(xs, 0, 10), slice(xs, -10, 2), slice(xs, 2, 1))"),
 }
 
 #[test]
+fn replace_swaps_every_match_and_refuses_an_empty_pattern() {
+    assert_eq!(
+        out(
+            r#"print(replace("a-b-c", "-", "+"), replace("aaaa", "aa", "b"), replace("héllo", "é", "e"), replace("abc", "x", "y"))"#
+        ),
+        ["a+b+c bb hello abc"]
+    );
+    // The original is untouched: strings are values, so only the result changes.
+    assert_eq!(
+        out(r#"let s = "cat"
+let t = replace(s, "c", "b")
+print(s, t)"#),
+        ["cat bat"]
+    );
+    assert!(err(r#"replace("abc", "", "x")"#).contains("not an empty string"));
+    assert!(
+        err(r#"replace("abc", 1, "x")"#)
+            .contains("replace needs three strings, not a string, a number and a string")
+    );
+}
+
+#[test]
 fn find_upper_and_lower_work_in_characters() {
     assert_eq!(
         out(r#"print(find("hello world", "o"), find("hello", "xyz"), find("abc", ""))"#),

@@ -879,7 +879,7 @@ fn name_of(constants: &[Value], k: u16) -> &str {
     }
 }
 
-const NATIVES: [Native; 27] = [
+const NATIVES: [Native; 28] = [
     Native {
         name: "print",
         arity: None,
@@ -1015,6 +1015,11 @@ const NATIVES: [Native; 27] = [
         arity: Some(1),
         call: native_lower,
     },
+    Native {
+        name: "replace",
+        arity: Some(3),
+        call: native_replace,
+    },
 ];
 
 // Where part first occurs in s, counted in characters like indexing and slice, so the
@@ -1074,6 +1079,25 @@ fn native_upper(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     }
 }
 
+// Every match of the second string swapped for the third, left to right without overlaps. An
+// empty pattern would match between every character, so it is refused rather than guessed at.
+fn native_replace(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
+    match (&args[0], &args[1], &args[2]) {
+        (Value::Str(_), Value::Str(old), Value::Str(_)) if old.is_empty() => {
+            Err("replace needs something to look for, not an empty string".into())
+        }
+        (Value::Str(s), Value::Str(old), Value::Str(new)) => {
+            Ok(Value::Str(s.replace(old.as_str(), new)))
+        }
+        (a, b, c) => Err(format!(
+            "replace needs three strings, not a {}, a {} and a {}",
+            a.type_name(),
+            b.type_name(),
+            c.type_name()
+        )),
+    }
+}
+
 fn native_lower(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     match &args[0] {
         Value::Str(s) => Ok(Value::Str(s.to_lowercase())),
@@ -1126,8 +1150,6 @@ fn native_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     }
 }
 
-// Sorts the list itself, as push changes it: numbers ascending, or strings by code point,
-// the order < uses. A mix is an error rather than a guess at which order was meant.
 // Turns the list itself around and returns nil, as sort does, so every name for it sees the change.
 fn native_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     let Value::List(r) = &args[0] else {
@@ -1140,6 +1162,8 @@ fn native_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     Ok(Value::Nil)
 }
 
+// Sorts the list itself, as push changes it: numbers ascending, or strings by code point,
+// the order < uses. A mix is an error rather than a guess at which order was meant.
 fn native_sort(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     let Value::List(r) = &args[0] else {
         return Err(format!("sort needs a list, not a {}", args[0].type_name()));
