@@ -120,6 +120,17 @@ pub enum Stmt {
     Continue {
         at: Span,
     },
+    // try { body } catch name { handler }: an error in the body runs the handler instead.
+    Try {
+        body: Vec<Stmt>,
+        name: String,
+        handler: Vec<Stmt>,
+        at: Span,
+    },
+    Throw {
+        value: Expr,
+        at: Span,
+    },
 }
 
 // Printed back as source, which is how the parser's output is checked.
@@ -183,6 +194,17 @@ pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
         Stmt::Block(body) => print_block(body, indent),
         Stmt::Break { .. } => "break;".to_string(),
         Stmt::Continue { .. } => "continue;".to_string(),
+        Stmt::Try {
+            body,
+            name,
+            handler,
+            ..
+        } => format!(
+            "try {} catch {name} {}",
+            print_block(body, indent),
+            print_block(handler, indent)
+        ),
+        Stmt::Throw { value, .. } => format!("throw {};", print_expr_at(value, indent)),
     };
     format!("{}{line}", pad(indent))
 }

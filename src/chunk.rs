@@ -163,6 +163,12 @@ pub enum Op {
     Jump(u16),
     // Leaves the condition on the stack; the code on each side pops it.
     JumpIfFalse(u16),
+    // Starts a try: an error before the matching EndTry unwinds to here, and the handler
+    // at the operand runs with the error on the stack where the next local would go.
+    Try(u16),
+    EndTry,
+    // Raises the value on top of the stack as an error.
+    Throw,
 }
 
 // Bytecode plus the line each instruction came from, kept beside it rather than
@@ -266,7 +272,7 @@ impl Chunk {
                     let name = name[..name.find('(').unwrap()].to_uppercase();
                     format!("{name:<12} {i:>4}")
                 }
-                Op::Jump(to) | Op::JumpIfFalse(to) => {
+                Op::Jump(to) | Op::JumpIfFalse(to) | Op::Try(to) => {
                     let name = format!("{op:?}");
                     let name = name[..name.find('(').unwrap()].to_uppercase();
                     format!("{name:<12} -> {to:04}")

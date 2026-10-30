@@ -82,6 +82,19 @@ item, and strings compare with `<` and `>` by Unicode code point. `for` walks
 a list, a string, or a map's keys in sorted order. `x in xs` asks whether
 `x` is in a list, among a map's keys, or inside a string.
 
+`try { ... } catch e { ... }` runs the catch when anything in the try goes
+wrong, however deep in calls, with the error's message in `e`. `throw` raises
+any value, so a map can carry a code, and the catch receives it as it was.
+
+```
+fn parse_age(text) {
+  let n = num(text)
+  if n < 0 { throw {"code": "negative", "text": text} }
+  return n
+}
+try { parse_age("-3") } catch e { print("rejected:", e.code) }
+```
+
 Built in: `print`, `str`, `format`, `num`, `len`, `push`, `pop`, `sort`, `reverse`, `min`, `max`, `abs`, `round`, `sum`, `slice`, `find`, `startswith`, `endswith`, `upper`, `lower`, `replace`, `keys`, `has`, `range`,
 `join`, `split`, `floor` and `clock`, written in Rust; and `map`, `filter`, `sort_by` and
 `reduce`, written in ember itself, in [src/prelude.em](src/prelude.em).
@@ -105,9 +118,9 @@ and the others.
 
 ## Checking it
 
-102 tests, one file per part of the language: parsing, the chunk, running
-expressions, calls, closures, lists, maps, the collector, the REPL and the
-standard library. Five more run every program on both the VM and the
+139 tests, one file per part of the language: parsing, the chunk, running
+expressions, calls, closures, lists, maps, loops, errors, the collector, the
+REPL and the standard library. Five more run every program on both the VM and the
 tree-walker, which share only the parser, and require the same output. They all pass a
 second time in stress mode, where the heap collects before every instruction
 that follows an allocation, which is how collector bugs get found. Programs are run and their printed

@@ -34,6 +34,8 @@ struct Loop {
     continue_to: Option<u16>,
     continues: Vec<usize>,
     breaks: Vec<usize>,
+    // Try blocks already open when the loop began; break and continue close the rest.
+    tries: usize,
 }
 
 struct FnState {
@@ -45,6 +47,8 @@ struct FnState {
     depth: usize,
     is_script: bool,
     upvalues: Vec<UpvalueRef>,
+    // Try blocks open at this point in the function, each with a handler on the VM's list.
+    tries: usize,
 }
 
 impl FnState {
@@ -62,6 +66,7 @@ impl FnState {
             depth: 0,
             is_script,
             upvalues: Vec::new(),
+            tries: 0,
         }
     }
 
@@ -179,12 +184,13 @@ impl Compiler {
     }
 
     fn begin_loop(&mut self, continue_to: Option<u16>) {
-        let depth = self.st_ref().depth;
+        let (depth, tries) = (self.st_ref().depth, self.st_ref().tries);
         self.st().loops.push(Loop {
             depth,
             continue_to,
             continues: Vec::new(),
             breaks: Vec::new(),
+            tries,
         });
     }
 
@@ -295,6 +301,7 @@ impl Compiler {
         code[at] = match code[at] {
             Op::Jump(_) => Op::Jump(to),
             Op::JumpIfFalse(_) => Op::JumpIfFalse(to),
+            Op::Try(_) => Op::Try(to),
             other => unreachable!("patched a {other:?}, which is not a jump"),
         };
         Ok(())
@@ -349,6 +356,10 @@ impl Compiler {
                     None => self.emit(Op::Nil),
                 }
                 self.at = *at;
+                // A return from inside a try leaves it, so its handler must not outlive the call.
+                for _ in 0..self.st_ref().tries {
+                    self.emit(Op::EndTry);
+                }
                 self.emit(Op::Return);
             }
             Stmt::For {
@@ -386,6 +397,34 @@ impl Compiler {
                 self.end_loop()?;
             }
             Stmt::Block(body) => self.block(body)?,
+            Stmt::Try {
+                body,
+                name,
+                handler,
+                at,
+            } => {
+                self.at = *at;
+                let start = self.jump(Op::Try);
+                self.st().tries += 1;
+                self.block(body)?;
+                self.st().tries -= 1;
+                self.emit(Op::EndTry);
+                let to_end = self.jump(Op::Jump);
+                self.patch(start)?;
+                // The VM leaves the error where the next local goes, so it is the catch name.
+                self.st().depth += 1;
+                self.declare(name);
+                for stmt in handler {
+                    self.stmt(stmt)?;
+                }
+                self.end_scope();
+                self.patch(to_end)?;
+            }
+            Stmt::Throw { value, at } => {
+                self.expr(value)?;
+                self.at = *at;
+                self.emit(Op::Throw);
+            }
             Stmt::Break { at } | Stmt::Continue { at } => {
                 self.at = *at;
                 let is_break = matches!(stmt, Stmt::Break { .. });
@@ -399,6 +438,11 @@ impl Compiler {
                     });
                 }
                 self.leave_loop_body();
+                let left =
+                    self.st_ref().tries - self.st_ref().loops.last().expect("checked above").tries;
+                for _ in 0..left {
+                    self.emit(Op::EndTry);
+                }
                 let continue_to = self
                     .st_ref()
                     .loops

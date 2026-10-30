@@ -498,3 +498,49 @@ Numbers keep their fast path, the same in-place arithmetic as before, with the
 repeat only reached when the two operands are not both numbers. A loop of two
 million multiplications took 190.3 ms before and 189.4 ms after.
 
+## Catching errors
+
+Until now any error ended the program. `try { ... } catch e { ... }` now runs
+the catch instead, and `throw` raises a value of the program's own. The VM
+keeps a list of open tries, innermost last. `TRY` records three things: how
+many frames there were, how high the stack stood, and where the catch begins.
+`ENDTRY` takes the record off again when the try finishes normally.
+
+The run loop needed no change to raise an error: it already returned a fault
+from wherever it failed. What changed is who receives it. The loop moved into
+its own function, which starts from whatever frame is on top, and the caller
+now looks for an open try when it gets a fault back. If there is one, it drops
+the frames above the try's own, closes any captured variables in the stack it
+is about to cut off, cuts the stack back to the height it had, and pushes the
+error. That is exactly where the next local would go, so the compiler treats
+the catch name as an ordinary local declared at that point, with no
+instruction to fill it. Then the loop starts again from the catch. If there is
+no try, the fault goes up as before, with its stack trace.
+
+A runtime error arrives in the catch as its message, a string. A thrown value
+arrives as itself, so a map can carry a code, and the VM keeps it to one side
+while unwinding, since a fault only carries text. Uncaught, a thrown value
+becomes the message, so `throw "bad input"` reads like any other error.
+
+The hard part is leaving a try early. A `return`, `break` or `continue` inside
+a try jumps straight past its `ENDTRY`, and the record left behind would catch
+some unrelated error later. The compiler counts the tries open at each point,
+and each loop remembers how many were open when it began. A `return` emits one
+`ENDTRY` per open try in its function, and `break` and `continue` one per try
+opened inside the loop. Frames that an error unwinds through need nothing,
+because cutting back to a try's own frame discards every record above it.
+
+Each of eleven breakages was tried against the tests: leaving the record behind
+on return, on break, or on a normal finish, closing every try on a break
+instead of just the loop's own, skipping the stack cut, the closing of captured
+variables or the dropped frames, catching with the oldest try instead of the
+newest, losing the thrown value, putting the error one slot off, and keeping a
+thrown value after an uncaught throw. Ten failed at once. Leaving the record
+behind on return passed, because the test only raised an error back in the
+script, where the stale record pointed at a frame that was gone. Now a second
+function runs at the depth the try had, and the stale record turns its error
+into something else.
+
+Moving the run loop into its own function cost nothing measurable: the old and
+new builds, run in turn four times each, differ by less than the runs of one
+build differ from each other.

@@ -21,6 +21,13 @@ struct Frame {
     base: usize,
 }
 
+// An open try: how deep the frames and the stack were when it began, and where its catch starts.
+struct Handler {
+    frames: usize,
+    stack: usize,
+    catch: usize,
+}
+
 // What the run loop raises: what went wrong, and the index of the instruction that failed
 // in the running function. run() turns that into a line, so no instruction pays for it.
 struct Fault {
@@ -83,6 +90,9 @@ pub struct Vm {
     // Upvalues still pointing at a live stack slot, so a second capture of the same slot
     // finds and shares the first rather than making a copy.
     open_upvalues: Vec<Ref>,
+    // Innermost last. A thrown value waits in `thrown` for the catch to put it on the stack.
+    handlers: Vec<Handler>,
+    thrown: Option<Value>,
     pub heap: Heap,
     // What print writes, so tests can read a program's output without capturing stdout.
     pub output: Vec<String>,
@@ -104,6 +114,8 @@ impl Vm {
             global_names: Vec::new(),
             global_slots: HashMap::new(),
             open_upvalues: Vec::new(),
+            handlers: Vec::new(),
+            thrown: None,
             heap: Heap::default(),
             output: Vec::new(),
             echo: false,
@@ -317,6 +329,8 @@ impl Vm {
             self.stack.clear();
             self.frames.clear();
             self.open_upvalues.clear();
+            self.handlers.clear();
+            self.thrown = None;
             RuntimeError {
                 message: fault.message,
                 at,
@@ -389,11 +403,33 @@ impl Vm {
             ip: 0,
             base: 0,
         });
+        loop {
+            let fault = match self.resume() {
+                Ok(value) => return Ok(value),
+                Err(fault) => fault,
+            };
+            let Some(handler) = self.handlers.pop() else {
+                return Err(fault);
+            };
+            // Unwind to the try: drop the frames and values above it, closing captured ones,
+            // and resume its frame at the catch with the error where the catch name lives.
+            let error = self.thrown.take().unwrap_or(Value::Str(fault.message));
+            self.frames.truncate(handler.frames);
+            self.close_from(handler.stack);
+            self.stack.truncate(handler.stack);
+            self.stack.push(error);
+            self.frames.last_mut().expect("the try's own frame").ip = handler.catch;
+        }
+    }
+
+    // Runs the innermost frame from where it stands until the script returns or a fault.
+    fn resume(&mut self) -> Result<Value, Fault> {
         // The running frame's state is kept in locals and written back only on a call.
-        let mut closure = closure;
-        let mut func = script;
-        let mut ip = 0;
-        let mut base = 0;
+        let frame = self.frames.last().expect("a frame to run");
+        let mut closure = frame.closure;
+        let mut func = Rc::clone(&frame.function);
+        let mut ip = frame.ip;
+        let mut base = frame.base;
         loop {
             if self.heap.wants_collection() {
                 self.collect();
@@ -665,6 +701,20 @@ impl Vm {
                     }
                 }
                 Op::Jump(to) => ip = to as usize,
+                Op::Try(to) => self.handlers.push(Handler {
+                    frames: self.frames.len(),
+                    stack: self.stack.len(),
+                    catch: to as usize,
+                }),
+                Op::EndTry => {
+                    self.handlers.pop();
+                }
+                Op::Throw => {
+                    let value = self.pop();
+                    let message = self.heap.show(&value);
+                    self.thrown = Some(value);
+                    return Err(Fault { message, at });
+                }
                 Op::JumpIfFalse(to) => {
                     if !self.stack.last().expect("a condition to test").truthy() {
                         ip = to as usize;

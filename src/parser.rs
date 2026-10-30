@@ -217,6 +217,27 @@ impl Parser {
                 })
             }
             Tok::LBrace => Ok(Stmt::Block(self.block()?)),
+            Tok::Try => {
+                let at = self.at();
+                self.advance();
+                let body = self.block()?;
+                self.expect(Tok::Catch)?;
+                let name = self.name()?;
+                let handler = self.block()?;
+                Ok(Stmt::Try {
+                    body,
+                    name,
+                    handler,
+                    at,
+                })
+            }
+            Tok::Throw => {
+                let at = self.at();
+                self.advance();
+                let value = self.expression()?;
+                self.eat(&Tok::Semicolon);
+                Ok(Stmt::Throw { value, at })
+            }
             Tok::Break | Tok::Continue => {
                 let at = self.at();
                 let is_break = self.advance().tok == Tok::Break;

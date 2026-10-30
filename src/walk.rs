@@ -136,6 +136,9 @@ impl Walker {
             Stmt::Break { .. } | Stmt::Continue { .. } => {
                 return Err("the tree-walker does not run break or continue".into());
             }
+            Stmt::Try { .. } | Stmt::Throw { .. } => {
+                return Err("the tree-walker does not run try or throw".into());
+            }
         }
         Ok(Flow::Normal)
     }
