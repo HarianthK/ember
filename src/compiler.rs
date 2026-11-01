@@ -619,32 +619,30 @@ impl Compiler {
                 self.expr(left)?;
                 self.expr(right)?;
                 self.at = *at;
-                self.emit(match op {
-                    BinOp::Add => Op::Add,
-                    BinOp::Sub => Op::Sub,
-                    BinOp::Mul => Op::Mul,
-                    BinOp::Div => Op::Div,
-                    BinOp::Rem => Op::Rem,
-                    BinOp::Eq => Op::Eq,
-                    BinOp::NotEq => Op::NotEq,
-                    BinOp::Less => Op::Less,
-                    BinOp::LessEq => Op::LessEq,
-                    BinOp::Greater => Op::Greater,
-                    BinOp::GreaterEq => Op::GreaterEq,
-                    BinOp::In => Op::In,
-                    BinOp::And | BinOp::Or => unreachable!("handled above"),
-                });
+                self.emit(binary_op(*op));
             }
             Expr::Name(name, at) => {
                 self.at = *at;
                 self.variable(name, false);
             }
-            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Name(..)) => {
+            Expr::Assign {
+                target,
+                op,
+                value,
+                at,
+            } if matches!(target.as_ref(), Expr::Name(..)) => {
                 let Expr::Name(name, _) = target.as_ref() else {
                     unreachable!()
                 };
+                if op.is_some() {
+                    self.at = *at;
+                    self.variable(name, false);
+                }
                 self.expr(value)?;
                 self.at = *at;
+                if let Some(op) = op {
+                    self.emit(binary_op(*op));
+                }
                 // Assignment is an expression, so the value stays on the stack after it is stored.
                 self.variable(name, true);
             }
@@ -678,7 +676,12 @@ impl Compiler {
                 self.at = *at;
                 self.emit(Op::GetIndex);
             }
-            Expr::Assign { target, value, at } if matches!(target.as_ref(), Expr::Index { .. }) => {
+            Expr::Assign {
+                target,
+                op,
+                value,
+                at,
+            } if matches!(target.as_ref(), Expr::Index { .. }) => {
                 let Expr::Index {
                     target: list,
                     index,
@@ -689,9 +692,7 @@ impl Compiler {
                 };
                 self.expr(list)?;
                 self.expr(index)?;
-                self.expr(value)?;
-                self.at = *at;
-                self.emit(Op::SetIndex);
+                self.update(*op, value, *at)?;
             }
             Expr::Map(pairs) => {
                 for (key, value) in pairs {
@@ -711,7 +712,12 @@ impl Compiler {
                 self.constant(Value::Str(name.clone()));
                 self.emit(Op::GetIndex);
             }
-            Expr::Assign { target, value, at } => {
+            Expr::Assign {
+                target,
+                op,
+                value,
+                at,
+            } => {
                 let Expr::Field {
                     target: map, name, ..
                 } = target.as_ref()
@@ -721,12 +727,45 @@ impl Compiler {
                 self.expr(map)?;
                 self.at = *at;
                 self.constant(Value::Str(name.clone()));
-                self.expr(value)?;
-                self.at = *at;
-                self.emit(Op::SetIndex);
+                self.update(*op, value, *at)?;
             }
         }
         Ok(())
+    }
+
+    // With the target and its key on the stack: the new value, then SetIndex. For op=, the
+    // two are copied first and the item read with them, so neither is worked out twice.
+    fn update(&mut self, op: Option<BinOp>, value: &Expr, at: Span) -> Result<(), CompileError> {
+        if op.is_some() {
+            self.at = at;
+            self.emit(Op::Dup2);
+            self.emit(Op::GetIndex);
+        }
+        self.expr(value)?;
+        self.at = at;
+        if let Some(op) = op {
+            self.emit(binary_op(op));
+        }
+        self.emit(Op::SetIndex);
+        Ok(())
+    }
+}
+
+fn binary_op(op: BinOp) -> Op {
+    match op {
+        BinOp::Add => Op::Add,
+        BinOp::Sub => Op::Sub,
+        BinOp::Mul => Op::Mul,
+        BinOp::Div => Op::Div,
+        BinOp::Rem => Op::Rem,
+        BinOp::Eq => Op::Eq,
+        BinOp::NotEq => Op::NotEq,
+        BinOp::Less => Op::Less,
+        BinOp::LessEq => Op::LessEq,
+        BinOp::Greater => Op::Greater,
+        BinOp::GreaterEq => Op::GreaterEq,
+        BinOp::In => Op::In,
+        BinOp::And | BinOp::Or => unreachable!("and and or jump instead"),
     }
 }
 

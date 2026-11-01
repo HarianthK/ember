@@ -77,8 +77,10 @@ pub enum Expr {
         params: Vec<String>,
         body: Vec<Stmt>,
     },
+    // x = v, or with op, x op= v: the target is read, combined with v, and written back.
     Assign {
         target: Box<Expr>,
+        op: Option<BinOp>,
         value: Box<Expr>,
         at: Span,
     },
@@ -268,10 +270,13 @@ pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
                 print_block(body, indent)
             )
         }
-        Expr::Assign { target, value, .. } => {
+        Expr::Assign {
+            target, op, value, ..
+        } => {
             format!(
-                "({} = {})",
+                "({} {}= {})",
                 print_expr_at(target, indent),
+                op.map_or("", |op| op.symbol()),
                 print_expr_at(value, indent)
             )
         }

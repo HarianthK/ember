@@ -154,6 +154,8 @@ pub enum Op {
     BuildMap(u16),
     GetIndex,
     SetIndex,
+    // Copies the top two values, so xs[i] += 1 reads the item it then writes with one xs and one i.
+    Dup2,
     // Starts a for loop: a map becomes a list of its keys, taken once, so changing the map
     // inside the loop cannot change what it walks; a list or string is left as it is.
     Iterable,

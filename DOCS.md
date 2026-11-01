@@ -544,3 +544,28 @@ into something else.
 Moving the run loop into its own function cost nothing measurable: the old and
 new builds, run in turn four times each, differ by less than the runs of one
 build differ from each other.
+
+## Updating in place
+
+`x += 1` could be sugar for `x = x + 1`, and for a name it is: read the
+variable, add, write it back, by slot for a local, by upvalue for a captured
+one. For an item it cannot be. `pick()[at()] += 5` written out longhand runs
+`pick()` and `at()` twice, and if either has an effect, or returns something
+different the second time, the item read is not the item written. So the
+list and the index are pushed once and copied with one new instruction,
+`DUP2`; `GETINDEX` uses the copies to read the item, the right side is added
+to it, and `SETINDEX` writes it with the originals. A field is the same with
+the name as a constant key. The test counts the calls: `pick()` once, `at()`
+once.
+
+The operator has to touch its `=`, as in every language with these: `x + = 2`
+is an error, not an update. Updating anything but a name, an item or a field
+is a parse error, as plain assignment is. The tree-walker updates names only,
+by building the `x + v` it stands for, and agrees with the VM on them; it
+still refuses items, as it does for plain assignment.
+
+Seven breakages fail the tests: `DUP2` copying one value, the item or the
+name not read before the update, `-=` lexed as `+=`, `%=` parsed as `/=`, the
+tree-walker ignoring the operator, and the printer leaving it out. The first
+attempt at two of them did not compile, which proves nothing, so they were
+written again until they did and then failed.

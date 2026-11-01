@@ -9,7 +9,7 @@ print(greeting, "fib(20) is", fib(20))
 
 let squares = []
 for n in [1, 2, 3, 4] {
-  squares = squares + [n * n]
+  squares += [n * n]
 }
 print("squares", squares)
 
@@ -38,7 +38,7 @@ print("word counts", counts)
 let i = 0
 let done = false
 while i < 10 and not done {
-  i = i + 1
+  i += 1
   done = i * i > 20
 }
 print("first square over 20 is", i, "squared")

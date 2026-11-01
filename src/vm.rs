@@ -575,6 +575,10 @@ impl Vm {
                 Op::Pop => {
                     self.pop();
                 }
+                Op::Dup2 => {
+                    let n = self.stack.len();
+                    self.stack.extend_from_within(n - 2..);
+                }
                 Op::Return => {
                     let result = self.pop();
                     let finished = self.frames.pop().expect("a frame to return from");

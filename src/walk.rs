@@ -190,11 +190,19 @@ impl Walker {
                     BinOp::And | BinOp::Or => unreachable!("handled above"),
                 }
             }
-            Expr::Assign { target, value, .. } => {
+            Expr::Assign {
+                target,
+                op,
+                value,
+                at,
+            } => {
                 let Expr::Name(name, _) = target.as_ref() else {
                     return Err("the tree-walker only assigns to names".into());
                 };
-                let v = self.expr(value, env)?;
+                let v = match op {
+                    Some(op) => self.expr(&Expr::Binary(*op, target.clone(), value.clone(), *at), env)?,
+                    None => self.expr(value, env)?,
+                };
                 env.set(name, v.clone())?;
                 v
             }

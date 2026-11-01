@@ -44,6 +44,12 @@ pub enum Tok {
     Slash,
     Percent,
     Assign,
+    // x += 1 and the others: the operator, then the assignment.
+    PlusAssign,
+    MinusAssign,
+    StarAssign,
+    SlashAssign,
+    PercentAssign,
     Eq,
     NotEq,
     Less,
@@ -94,6 +100,11 @@ impl fmt::Display for Tok {
             Tok::Slash => "/",
             Tok::Percent => "%",
             Tok::Assign => "=",
+            Tok::PlusAssign => "+=",
+            Tok::MinusAssign => "-=",
+            Tok::StarAssign => "*=",
+            Tok::SlashAssign => "/=",
+            Tok::PercentAssign => "%=",
             Tok::Eq => "==",
             Tok::NotEq => "!=",
             Tok::Less => "<",
@@ -332,6 +343,16 @@ impl<'a> Lexer<'a> {
             b';' => Tok::Semicolon,
             b':' => Tok::Colon,
             b'.' => Tok::Dot,
+            b'+' | b'-' | b'*' | b'/' | b'%' if self.peek() == b'=' => {
+                self.bump();
+                match c {
+                    b'+' => Tok::PlusAssign,
+                    b'-' => Tok::MinusAssign,
+                    b'*' => Tok::StarAssign,
+                    b'/' => Tok::SlashAssign,
+                    _ => Tok::PercentAssign,
+                }
+            }
             b'+' => Tok::Plus,
             b'-' => Tok::Minus,
             b'*' => Tok::Star,

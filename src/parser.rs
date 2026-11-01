@@ -284,26 +284,33 @@ impl Parser {
 
     fn assignment(&mut self) -> Result<Expr, ParseError> {
         let left = self.binary(0)?;
-        if self.peek() == &Tok::Assign {
-            let at = self.at();
-            self.advance();
-            // Right associative, so a = b = c parses as a = (b = c).
-            let value = self.assignment()?;
-            return match left {
-                Expr::Name(..) | Expr::Index { .. } | Expr::Field { .. } => Ok(Expr::Assign {
-                    target: Box::new(left),
-                    value: Box::new(value),
-                    at,
-                }),
-                _ => Err(ParseError {
-                    message:
-                        "I cannot assign to this; the left side must be a name, an index or a field"
-                            .into(),
-                    at,
-                }),
-            };
+        let op = match self.peek() {
+            Tok::Assign => None,
+            Tok::PlusAssign => Some(BinOp::Add),
+            Tok::MinusAssign => Some(BinOp::Sub),
+            Tok::StarAssign => Some(BinOp::Mul),
+            Tok::SlashAssign => Some(BinOp::Div),
+            Tok::PercentAssign => Some(BinOp::Rem),
+            _ => return Ok(left),
+        };
+        let at = self.at();
+        self.advance();
+        // Right associative, so a = b = c parses as a = (b = c).
+        let value = self.assignment()?;
+        match left {
+            Expr::Name(..) | Expr::Index { .. } | Expr::Field { .. } => Ok(Expr::Assign {
+                target: Box::new(left),
+                op,
+                value: Box::new(value),
+                at,
+            }),
+            _ => Err(ParseError {
+                message:
+                    "I cannot assign to this; the left side must be a name, an index or a field"
+                        .into(),
+                at,
+            }),
         }
-        Ok(left)
     }
 
     fn binary(&mut self, min_power: u8) -> Result<Expr, ParseError> {
