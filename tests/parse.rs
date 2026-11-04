@@ -91,6 +91,18 @@ fn precedence_is_what_arithmetic_says() {
 }
 
 #[test]
+fn power_binds_tightest_and_groups_to_the_right() {
+    assert_eq!(kinds("a**=b")[1], Tok::StarStarAssign);
+    assert_eq!(kinds("a ** b * c")[1], Tok::StarStar);
+    assert_eq!(expr("2 * 3 ** 2"), "(2 * (3 ** 2))");
+    assert_eq!(expr("2 ** 3 ** 2"), "(2 ** (3 ** 2))");
+    // As in Python: the minus on the left applies to the result, the one on the right to the exponent.
+    assert_eq!(expr("-2 ** 2"), "(-(2 ** 2))");
+    assert_eq!(expr("2 ** -1"), "(2 ** (-1))");
+    assert_eq!(expr("xs[0] ** f(2)"), "(xs[0] ** f(2))");
+}
+
+#[test]
 fn assignment_is_right_associative_and_checked() {
     assert_eq!(expr("a = b = 1"), "(a = (b = 1))");
     assert_eq!(expr("xs[0] = 1"), "(xs[0] = 1)");
@@ -182,6 +194,7 @@ fn printing_and_reparsing_is_stable() {
         r#"let m = {"a": 1, "b": [true, nil, -2.5]}; m.a = m["b"][0];"#,
         "let add = fn(a, b) { return a + b; }; add(1, 2);",
         "while true { if done { break } if skip { continue } }",
+        "let y = -2 ** 3 ** -1; y **= 2;",
     ];
     for src in sources {
         let first = parse(src).unwrap_or_else(|e| panic!("{src}: {e}"));

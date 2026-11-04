@@ -180,6 +180,7 @@ impl Walker {
                     BinOp::Mul => V::Num(a * b),
                     BinOp::Div => V::Num(a / b),
                     BinOp::Rem => V::Num(a % b),
+                    BinOp::Pow => V::Num(a.powf(b)),
                     BinOp::Eq => V::Bool(a == b),
                     BinOp::NotEq => V::Bool(a != b),
                     BinOp::Less => V::Bool(a < b),

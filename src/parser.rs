@@ -291,6 +291,7 @@ impl Parser {
             Tok::StarAssign => Some(BinOp::Mul),
             Tok::SlashAssign => Some(BinOp::Div),
             Tok::PercentAssign => Some(BinOp::Rem),
+            Tok::StarStarAssign => Some(BinOp::Pow),
             _ => return Ok(left),
         };
         let at = self.at();
@@ -340,8 +341,26 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Unary(UnOp::Not, Box::new(self.unary()?), at))
             }
-            _ => self.postfix(),
+            _ => self.power(),
         }
+    }
+
+    // ** binds tighter than a minus on its left and groups to the right, as in Python:
+    // -2 ** 2 is -(2 ** 2), and 2 ** 3 ** 2 is 2 ** (3 ** 2).
+    fn power(&mut self) -> Result<Expr, ParseError> {
+        let base = self.postfix()?;
+        if self.peek() != &Tok::StarStar {
+            return Ok(base);
+        }
+        let at = self.at();
+        self.advance();
+        let exponent = self.unary()?;
+        Ok(Expr::Binary(
+            BinOp::Pow,
+            Box::new(base),
+            Box::new(exponent),
+            at,
+        ))
     }
 
     fn postfix(&mut self) -> Result<Expr, ParseError> {

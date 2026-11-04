@@ -116,6 +116,7 @@ pub enum Op {
     Mul,
     Div,
     Rem,
+    Pow,
     Neg,
     Not,
     Eq,

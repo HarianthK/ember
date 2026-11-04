@@ -758,6 +758,7 @@ fn binary_op(op: BinOp) -> Op {
         BinOp::Mul => Op::Mul,
         BinOp::Div => Op::Div,
         BinOp::Rem => Op::Rem,
+        BinOp::Pow => Op::Pow,
         BinOp::Eq => Op::Eq,
         BinOp::NotEq => Op::NotEq,
         BinOp::Less => Op::Less,

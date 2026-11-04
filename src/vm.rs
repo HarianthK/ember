@@ -508,6 +508,16 @@ impl Vm {
                         Ok(Value::Number(x % y))
                     }
                 })?,
+                // Refused, like division by zero, rather than a quiet infinity or NaN.
+                Op::Pow => self.arith("**", at, |x, y| {
+                    if x == 0.0 && y < 0.0 {
+                        Err("zero to a negative power")
+                    } else if x < 0.0 && y.fract() != 0.0 {
+                        Err("a negative number to a fractional power")
+                    } else {
+                        Ok(Value::Number(x.powf(y)))
+                    }
+                })?,
                 Op::Neg => match self.pop() {
                     Value::Number(n) => self.stack.push(Value::Number(-n)),
                     other => {

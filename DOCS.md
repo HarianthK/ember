@@ -569,3 +569,26 @@ name not read before the update, `-=` lexed as `+=`, `%=` parsed as `/=`, the
 tree-walker ignoring the operator, and the printer leaving it out. The first
 attempt at two of them did not compile, which proves nothing, so they were
 written again until they did and then failed.
+
+## Raising to a power
+
+`**` is the one operator that does not go through the precedence table. It
+binds tighter than a minus on its left, so `-2 ** 2` is -4, and it groups to the
+right, so `2 ** 3 ** 2` is 2 to the 9th, 512; both are what Python and
+mathematics say. A table entry gives left grouping and sits below unary minus,
+which gets both wrong. So `**` has its own small level between unary and
+postfix: it parses the base as a postfix expression, and the exponent by going
+back up to unary, which allows `2 ** -1` and, by recursing, the right grouping.
+
+Two results are refused rather than returned. `0 ** -1` is an error, the way
+division by zero already is, instead of an infinity. A negative number to a
+fractional power, `(-8) ** 0.5`, has no real answer and would be NaN, which
+then compares unequal to everything and spreads silently, so it is an error
+too. `(-8) ** 2` is fine: only a fraction of a negative base is refused. The
+tree-walker computes the power without these checks, as it does division.
+
+`**=` came free: the compound assignment already takes any binary operator,
+so it needed only its token. Seven breakages each fail a test: the exponent
+parsed without its unary level, the power level skipped, the tree-walker
+multiplying instead, either refusal removed, `**=` lexed as `**`, and the
+printer writing `*`.

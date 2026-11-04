@@ -42,3 +42,6 @@ while i < 10 and not done {
   done = i * i > 20
 }
 print("first square over 20 is", i, "squared")
+
+let area = 3.14159 * 2 ** 2
+print("a circle of radius 2 covers", round(area, 2), "and 2 ** 10 is", 2 ** 10)

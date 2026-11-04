@@ -31,13 +31,14 @@ x -= 1
 x *= 4
 x /= 2
 x %= 5
+x **= 3
 print(x)";
-    assert_eq!(out(src), ["4"]);
+    assert_eq!(out(src), ["64"]);
     // + joins strings and lists, so += does too, and the result is the value of the expression.
     assert_eq!(out("let s = \"a\"\ns += \"b\"\nprint(s += \"c\", s)"), ["abc abc"]);
     assert_eq!(out("let xs = [1]\nxs += [2, 3]\nprint(xs)"), ["[1, 2, 3]"]);
     // The tree-walker, which shares only the parser, gets the same answer.
-    assert_eq!(Walker::run(src).unwrap(), ["4"]);
+    assert_eq!(Walker::run(src).unwrap(), ["64"]);
 }
 
 #[test]
@@ -110,9 +111,9 @@ fn errors_name_what_is_missing() {
 
 #[test]
 fn updates_print_back_as_written() {
-    let program = parse("x += 1; xs[0] -= 2; p.n *= 3; q /= 4; r %= 5; y = 6;").unwrap();
+    let program = parse("x += 1; xs[0] -= 2; p.n *= 3; q /= 4; r %= 5; z **= 2; y = 6;").unwrap();
     assert_eq!(
         print_stmts(&program, 0),
-        "(x += 1);\n(xs[0] -= 2);\n(p.n *= 3);\n(q /= 4);\n(r %= 5);\n(y = 6);"
+        "(x += 1);\n(xs[0] -= 2);\n(p.n *= 3);\n(q /= 4);\n(r %= 5);\n(z **= 2);\n(y = 6);"
     );
 }

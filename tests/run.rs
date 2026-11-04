@@ -23,6 +23,10 @@ fn arithmetic_follows_precedence() {
     assert_eq!(out("print(20 / 4 / 5)"), ["1"]);
     assert_eq!(out("print(7 % 3)"), ["1"]);
     assert_eq!(out("print(-2 * -3)"), ["6"]);
+    assert_eq!(
+        out("print(2 ** 10, 2 ** 3 ** 2, -2 ** 2, 2 ** -1, 9 ** 0.5)"),
+        ["1024 512 -4 0.5 3"]
+    );
     assert_eq!(out("print(0.1 + 0.2)"), ["0.30000000000000004"]);
 }
 
@@ -69,6 +73,9 @@ fn runtime_errors_say_what_and_where() {
 
     assert!(err("print(-\"a\")").contains("- needs a number, not a string"));
     assert!(err("print(1 / 0)").contains("division by zero"));
+    assert!(err("print(0 ** -1)").contains("zero to a negative power"));
+    assert!(err("print((-8) ** 0.5)").contains("a negative number to a fractional power"));
+    assert!(err("print(2 ** \"a\")").contains("** needs two numbers, not a number and a string"));
     assert!(err("print(1 < nil)").contains("< needs two numbers"));
 }
 

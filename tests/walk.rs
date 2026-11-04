@@ -11,8 +11,8 @@ fn both(src: &str) -> Vec<String> {
 #[test]
 fn the_engines_agree_on_arithmetic_and_logic() {
     assert_eq!(
-        both("print(1 + 2 * 3, 10 - 3 - 2, 7 % 3, -2 * -3)"),
-        ["7 5 1 6"]
+        both("print(1 + 2 * 3, 10 - 3 - 2, 7 % 3, -2 * -3, -2 ** 3 ** 2, 2 ** -2)"),
+        ["7 5 1 6 -512 0.25"]
     );
     assert_eq!(
         both("print(1 < 2 and 3 > 4, nil or 5, not 0)"),
