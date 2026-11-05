@@ -70,6 +70,9 @@ its upvalue 0.
 Dynamically typed. Values are numbers (one float type), strings, booleans,
 `nil`, lists, maps and functions. Functions are values and close over the
 variables around them, so `fn add(a, b) {}` is sugar for `let add = fn(a, b) {}`.
+A parameter can have a default, `fn greet(name, greeting = "hello")`, used when
+a call leaves it out; it is worked out at each call and can use the parameters
+before it, so `fn span(xs, end = len(xs))` works.
 Lists and maps are shared, not copied, as in Python. Map keys are strings, and
 `m.name` is sugar for `m["name"]`. A missing key or an undefined name is an
 error rather than a quiet `nil`, and a misspelt name suggests the one it was

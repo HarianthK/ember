@@ -479,6 +479,7 @@ impl Compiler {
         &mut self,
         name: &Option<String>,
         params: &[String],
+        defaults: &[Expr],
         body: &[Stmt],
     ) -> Result<(), CompileError> {
         let at = self.at;
@@ -494,7 +495,17 @@ impl Compiler {
         state.chunk.source = self.source;
         // Parameters are the first locals, in the slots the caller's arguments already occupy.
         state.depth = 1;
-        for param in params {
+        self.states.push(state);
+        // A default is code that pushes its value into the next parameter's slot, so it can
+        // read the parameters before it. A call skips the defaults its arguments cover.
+        let required = params.len() - defaults.len();
+        let mut entries = Vec::new();
+        for (i, param) in params.iter().enumerate() {
+            if let Some(default) = i.checked_sub(required).map(|d| &defaults[d]) {
+                entries.push(self.st_ref().chunk.code.len());
+                self.expr(default)?;
+            }
+            let state = self.st();
             if state.locals.iter().skip(1).any(|l| &l.name == param) {
                 return Err(CompileError {
                     message: format!("the parameter {param} is repeated"),
@@ -507,7 +518,7 @@ impl Compiler {
                 captured: false,
             });
         }
-        self.states.push(state);
+        entries.push(self.st_ref().chunk.code.len());
         // The body runs at the parameters' depth, so `let a` in it cannot silently hide parameter a.
         for stmt in body {
             self.stmt(stmt)?;
@@ -524,6 +535,8 @@ impl Compiler {
                 own_name
             },
             arity,
+            required: required as u8,
+            entries,
             chunk: state.chunk,
             upvalues: state.upvalues,
         };
@@ -659,7 +672,12 @@ impl Compiler {
                 })?;
                 self.emit(Op::Call(argc));
             }
-            Expr::Func { name, params, body } => self.function(name, params, body)?,
+            Expr::Func {
+                name,
+                params,
+                defaults,
+                body,
+            } => self.function(name, params, defaults, body)?,
             Expr::List(items) => {
                 for item in items {
                     self.expr(item)?;
@@ -813,6 +831,8 @@ fn compile_script(
     Ok(Rc::new(Function {
         name: "script".into(),
         arity: 0,
+        required: 0,
+        entries: vec![0],
         chunk: state.chunk,
         upvalues: Vec::new(),
     }))

@@ -45,3 +45,8 @@ print("first square over 20 is", i, "squared")
 
 let area = 3.14159 * 2 ** 2
 print("a circle of radius 2 covers", round(area, 2), "and 2 ** 10 is", 2 ** 10)
+
+fn greet(name, greeting = "hello", mark = "!") {
+  return greeting + ", " + name + mark
+}
+print(greet("ada"), greet("grace", "hi"))

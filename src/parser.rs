@@ -267,15 +267,34 @@ impl Parser {
         };
         self.expect(Tok::LParen)?;
         let mut params = Vec::new();
+        let mut defaults = Vec::new();
         while self.peek() != &Tok::RParen {
-            params.push(self.name()?);
+            let at = self.at();
+            let param = self.name()?;
+            if self.eat(&Tok::Assign) {
+                defaults.push(self.binary(0)?);
+            } else if !defaults.is_empty() {
+                // A caller leaves out arguments from the end, so a required one cannot follow.
+                return Err(ParseError {
+                    message: format!(
+                        "{param} needs a default, since a parameter before it has one"
+                    ),
+                    at,
+                });
+            }
+            params.push(param);
             if !self.eat(&Tok::Comma) {
                 break;
             }
         }
         self.expect(Tok::RParen)?;
         let body = self.block()?;
-        Ok(Expr::Func { name, params, body })
+        Ok(Expr::Func {
+            name,
+            params,
+            defaults,
+            body,
+        })
     }
 
     pub fn expression(&mut self) -> Result<Expr, ParseError> {

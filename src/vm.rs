@@ -296,6 +296,8 @@ impl Vm {
         Rc::new(Function {
             name: function.name.clone(),
             arity: function.arity,
+            required: function.required,
+            entries: function.entries.clone(),
             chunk,
             upvalues: function.upvalues.clone(),
         })
@@ -637,13 +639,18 @@ impl Vm {
                         }
                     };
                     let callee_func = Rc::clone(&self.heap.closure(callee).function);
-                    if callee_func.arity != argc {
+                    if argc < callee_func.required || argc > callee_func.arity {
+                        let (low, high) = (callee_func.required, callee_func.arity);
+                        let takes = if low == high {
+                            format!("{high}")
+                        } else {
+                            format!("{low} to {high}")
+                        };
                         return Err(Fault {
                             message: format!(
-                                "{} takes {} argument{}, but was given {argc}",
+                                "{} takes {takes} argument{}, but was given {argc}",
                                 callee_func.name,
-                                callee_func.arity,
-                                if callee_func.arity == 1 { "" } else { "s" }
+                                if high == 1 { "" } else { "s" }
                             ),
                             at,
                         });
@@ -665,8 +672,8 @@ impl Vm {
                         base: callee_at,
                     });
                     closure = callee;
+                    ip = callee_func.entries[(argc - callee_func.required) as usize];
                     func = callee_func;
-                    ip = 0;
                     base = callee_at;
                 }
                 Op::DefineGlobal(_) | Op::GetGlobal(_) | Op::SetGlobal(_) => {

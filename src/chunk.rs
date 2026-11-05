@@ -37,6 +37,10 @@ impl fmt::Debug for Native {
 pub struct Function {
     pub name: String,
     pub arity: u8,
+    // Fewest arguments a call may pass; the rest have defaults.
+    pub required: u8,
+    // Where a call with required + i arguments starts: at the code for the first default it lacks.
+    pub entries: Vec<usize>,
     pub chunk: Chunk,
     // What a closure of this function captures, in order, when it is created.
     pub upvalues: Vec<UpvalueRef>,

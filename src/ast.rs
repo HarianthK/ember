@@ -74,9 +74,11 @@ pub enum Expr {
         name: String,
         at: Span,
     },
+    // defaults belong to the last defaults.len() params, which a caller may leave out.
     Func {
         name: Option<String>,
         params: Vec<String>,
+        defaults: Vec<Expr>,
         body: Vec<Stmt>,
     },
     // x = v, or with op, x op= v: the target is read, combined with v, and written back.
@@ -264,11 +266,25 @@ pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
             )
         }
         Expr::Field { target, name, .. } => format!("{}.{name}", print_expr_at(target, indent)),
-        Expr::Func { name, params, body } => {
+        Expr::Func {
+            name,
+            params,
+            defaults,
+            body,
+        } => {
             let named = name.clone().unwrap_or_default();
+            let first_default = params.len() - defaults.len();
+            let shown: Vec<String> = params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| match i.checked_sub(first_default) {
+                    Some(d) => format!("{p} = {}", print_expr_at(&defaults[d], indent)),
+                    None => p.clone(),
+                })
+                .collect();
             format!(
                 "fn {named}({}) {}",
-                params.join(", "),
+                shown.join(", "),
                 print_block(body, indent)
             )
         }

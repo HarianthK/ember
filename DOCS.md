@@ -592,3 +592,34 @@ so it needed only its token. Seven breakages each fail a test: the exponent
 parsed without its unary level, the power level skipped, the tree-walker
 multiplying instead, either refusal removed, `**=` lexed as `**`, and the
 printer writing `*`.
+
+## Default parameters
+
+`fn greet(name, greeting = "hello")` lets a call leave out `greeting`. Two
+choices decide what a default means. It is worked out at every call, not once
+when the function is made, so `fn bag(item, into = [])` gets a fresh list each
+time; Python works it out once, and the shared list is a famous surprise. And it
+runs inside the call, after the parameters before it, so `end = len(xs)` can
+read `xs`. Passing `nil` is passing a value, not leaving one out: `f(nil)` gets
+`nil`.
+
+The VM needed no new instruction. Parameters are the first stack slots of a
+frame, so a default is compiled as plain code that leaves its value on top of
+the stack, which is exactly the next parameter's slot. The function starts with
+that code for each default in order, then the body, and keeps one entry point
+per argument count it accepts: a call with every argument starts at the body,
+a call missing the last two starts at the second-to-last default and runs both.
+While a default is compiled only the parameters before it are declared, so it
+cannot read its own slot or a later one. A call is checked against the range,
+and the message gives it: `f takes 1 to 2 arguments, but was given 3`. A
+required parameter after one with a default is a parse error, since a call can
+only leave arguments out from the end. The tree-walker binds what was given,
+then works out the rest in the new frame, and agrees with the VM.
+
+Seven breakages fail the tests: every call starting at the first default, every
+call skipping them all, too few arguments let through, a required parameter
+accepted after a default, the tree-walker ignoring defaults, the printer
+dropping them, and the message giving one number for a range. Letting too few
+arguments through is caught by a crash, not an assertion: the entry index goes
+below zero and the VM panics, which fails the test but would be a worse error
+for a user than the one the check gives.

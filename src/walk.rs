@@ -15,6 +15,7 @@ enum V {
 
 struct FuncDef {
     params: Vec<String>,
+    defaults: Vec<Expr>,
     body: Vec<Stmt>,
 }
 
@@ -201,15 +202,23 @@ impl Walker {
                     return Err("the tree-walker only assigns to names".into());
                 };
                 let v = match op {
-                    Some(op) => self.expr(&Expr::Binary(*op, target.clone(), value.clone(), *at), env)?,
+                    Some(op) => {
+                        self.expr(&Expr::Binary(*op, target.clone(), value.clone(), *at), env)?
+                    }
                     None => self.expr(value, env)?,
                 };
                 env.set(name, v.clone())?;
                 v
             }
-            Expr::Func { params, body, .. } => V::Func(
+            Expr::Func {
+                params,
+                defaults,
+                body,
+                ..
+            } => V::Func(
                 Rc::new(FuncDef {
                     params: params.clone(),
+                    defaults: defaults.clone(),
                     body: body.clone(),
                 }),
                 Rc::clone(env),
@@ -228,7 +237,18 @@ impl Walker {
                     return Err("only a function can be called".into());
                 };
                 let frame = Env::new(Some(captured));
+                let given = values.len();
                 for (p, v) in def.params.iter().zip(values) {
+                    frame.vars.borrow_mut().insert(p.clone(), v);
+                }
+                // Defaults run in the new frame, so they can read the parameters before them.
+                let first_default = def.params.len() - def.defaults.len();
+                for (i, p) in def.params.iter().enumerate().skip(given) {
+                    let Some(default) = i.checked_sub(first_default).map(|d| &def.defaults[d])
+                    else {
+                        return Err(format!("{p} was not given"));
+                    };
+                    let v = self.expr(default, &frame)?;
                     frame.vars.borrow_mut().insert(p.clone(), v);
                 }
                 match self.block(&def.body, &frame)? {
