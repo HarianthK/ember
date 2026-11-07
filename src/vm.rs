@@ -801,6 +801,20 @@ impl Vm {
                     let map = self.heap.alloc(Obj::Map(entries));
                     self.stack.push(Value::Map(map));
                 }
+                Op::Slice => {
+                    let end = match self.pop() {
+                        Value::Nil => None,
+                        v => Some(v),
+                    };
+                    let start = match self.pop() {
+                        Value::Nil => Value::Number(0.0),
+                        v => v,
+                    };
+                    let target = self.pop();
+                    let part = cut(self, &target, &start, end.as_ref())
+                        .map_err(|message| Fault { message, at })?;
+                    self.stack.push(part);
+                }
                 Op::GetIndex => {
                     let index = self.pop();
                     let target = self.pop();
@@ -1180,16 +1194,18 @@ fn native_lower(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 // Negative positions count from the end, and unlike an index a slice is trimmed to fit
 // rather than an error, as in Python, so "the first ten" works on a shorter list.
 fn native_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
-    let (start, end) = match args {
-        [_, start] => (start, None),
-        [_, start, end] => (start, Some(end)),
-        _ => {
-            return Err(format!(
-                "slice takes 2 or 3 arguments, but was given {}",
-                args.len()
-            ));
-        }
-    };
+    match args {
+        [target, start] => cut(vm, target, start, None),
+        [target, start, end] => cut(vm, target, start, Some(end)),
+        _ => Err(format!(
+            "slice takes 2 or 3 arguments, but was given {}",
+            args.len()
+        )),
+    }
+}
+
+// Shared by slice() and xs[a:b].
+fn cut(vm: &mut Vm, target: &Value, start: &Value, end: Option<&Value>) -> Result<Value, String> {
     let whole = |v: &Value| match v {
         Value::Number(n) if n.fract() == 0.0 => Ok(*n),
         other => Err(format!("slice needs whole numbers, not {other}")),
@@ -1201,7 +1217,7 @@ fn native_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
         let from = fit(start);
         (from, end.map_or(len, fit).max(from))
     };
-    match &args[0] {
+    match target {
         Value::List(r) => {
             let items = vm.heap.list(*r);
             let (from, to) = range(items.len());

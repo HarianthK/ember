@@ -69,6 +69,13 @@ pub enum Expr {
         index: Box<Expr>,
         at: Span,
     },
+    // xs[a:b]; a left-out end is the start or the end of xs.
+    Slice {
+        target: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        at: Span,
+    },
     Field {
         target: Box<Expr>,
         name: String,
@@ -263,6 +270,17 @@ pub fn print_expr_at(expr: &Expr, indent: usize) -> String {
                 "{}[{}]",
                 print_expr_at(target, indent),
                 print_expr_at(index, indent)
+            )
+        }
+        Expr::Slice {
+            target, start, end, ..
+        } => {
+            let part = |e: &Option<Box<Expr>>| e.as_deref().map(|e| print_expr_at(e, indent));
+            format!(
+                "{}[{}:{}]",
+                print_expr_at(target, indent),
+                part(start).unwrap_or_default(),
+                part(end).unwrap_or_default()
             )
         }
         Expr::Field { target, name, .. } => format!("{}.{name}", print_expr_at(target, indent)),

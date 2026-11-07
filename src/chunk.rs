@@ -159,6 +159,8 @@ pub enum Op {
     BuildMap(u16),
     GetIndex,
     SetIndex,
+    // Target, start and end, either end nil when left out, to a new list or string.
+    Slice,
     // Copies the top two values, so xs[i] += 1 reads the item it then writes with one xs and one i.
     Dup2,
     // Starts a for loop: a map becomes a list of its keys, taken once, so changing the map

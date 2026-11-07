@@ -623,3 +623,32 @@ dropping them, and the message giving one number for a range. Letting too few
 arguments through is caught by a crash, not an assertion: the entry index goes
 below zero and the VM panics, which fails the test but would be a worse error
 for a user than the one the check gives.
+
+## Slices
+
+`xs[a:b]` gives the items from `a` up to but not including `b`, as a new list,
+and works on strings by character. It follows the `slice()` function exactly,
+because both call one Rust function: a negative end counts from the back, an
+end past either side is cut to fit, and an end before the start gives an empty
+list rather than an error. That last one differs from indexing, where going out
+of range is an error, and is what Python does; a slice asks for a range, and an
+empty range is a fair answer.
+
+The parser reads `[`, then an expression unless the next token is `:`, then a
+`:` makes it a slice, with an end unless the next token is `]`. A left-out end
+compiles to `nil`, so the new `SLICE` instruction always takes three values,
+and a left-out start becomes 0. Assigning to a slice is refused by the parser,
+which only accepts names, indexes and fields on the left. The tree-walker has
+no lists, so there is nothing for it to agree with here.
+
+I first wrote `SLICE` to read its operands without popping them, so that the
+old list stayed a root while the new one was allocated. The breakage for it,
+popping first, passed in stress mode, which sent me to the collector: it only
+runs between instructions, never inside one, so nothing can be freed halfway
+through `SLICE`. The careful version was guarding against something that cannot
+happen, and it went.
+
+Seven breakages fail the tests: a left-out end read as 0, a left-out start read
+as 1, the two ends popped or compiled the wrong way round, the end parsed and
+then dropped, the printer losing the colon, and `slice()` with two arguments
+passing its start as the end too.

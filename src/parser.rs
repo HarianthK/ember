@@ -405,11 +405,28 @@ impl Parser {
                 }
                 Tok::LBracket => {
                     self.advance();
-                    let index = self.expression()?;
+                    let start = match self.peek() {
+                        Tok::Colon => None,
+                        _ => Some(Box::new(self.expression()?)),
+                    };
+                    if self.eat(&Tok::Colon) {
+                        let end = match self.peek() {
+                            Tok::RBracket => None,
+                            _ => Some(Box::new(self.expression()?)),
+                        };
+                        self.expect(Tok::RBracket)?;
+                        expr = Expr::Slice {
+                            target: Box::new(expr),
+                            start,
+                            end,
+                            at,
+                        };
+                        continue;
+                    }
                     self.expect(Tok::RBracket)?;
                     expr = Expr::Index {
                         target: Box::new(expr),
-                        index: Box::new(index),
+                        index: start.expect("an index with no colon was parsed above"),
                         at,
                     };
                 }

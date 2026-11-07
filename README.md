@@ -84,7 +84,9 @@ name, a list item or a map field in place, so `counts[w] += 1` works out
 and `continue`. `*` repeats a string or a list, so `[0] * 64` makes a list of
 zeros. `**` raises to a power and groups to the right, so `2 ** 3 ** 2` is
 512 and `-2 ** 2` is -4, as in Python, and `**=` updates in place. A negative index counts from the end, so `xs[-1]` is the last
-item, and strings compare with `<` and `>` by Unicode code point. `for` walks
+item, and `xs[1:3]` is a new list of the items from 1 up to 3, with either
+end left out (`xs[:2]`, `xs[2:]`, `xs[:]` for a copy) or negative, and the
+same on strings by character. Strings compare with `<` and `>` by Unicode code point. `for` walks
 a list, a string, or a map's keys in sorted order. `x in xs` asks whether
 `x` is in a list, among a map's keys, or inside a string.
 
@@ -124,8 +126,8 @@ and the others.
 
 ## Checking it
 
-146 tests, one file per part of the language: parsing, the chunk, running
-expressions, calls, closures, lists, maps, loops, errors, the collector, the
+159 tests, one file per part of the language: parsing, the chunk, running
+expressions, calls, closures, lists, slices, maps, loops, errors, the collector, the
 REPL and the standard library. Five more run every program on both the VM and the
 tree-walker, which share only the parser, and require the same output. They all pass a
 second time in stress mode, where the heap collects before every instruction

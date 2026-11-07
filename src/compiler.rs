@@ -694,6 +694,22 @@ impl Compiler {
                 self.at = *at;
                 self.emit(Op::GetIndex);
             }
+            Expr::Slice {
+                target,
+                start,
+                end,
+                at,
+            } => {
+                self.expr(target)?;
+                for part in [start, end] {
+                    match part {
+                        Some(e) => self.expr(e)?,
+                        None => self.emit(Op::Nil),
+                    }
+                }
+                self.at = *at;
+                self.emit(Op::Slice);
+            }
             Expr::Assign {
                 target,
                 op,
