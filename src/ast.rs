@@ -196,10 +196,15 @@ pub fn print_stmt(stmt: &Stmt, indent: usize) -> String {
             )
         }
         Stmt::For {
-            name, iter, body, ..
+            index,
+            name,
+            iter,
+            body,
+            ..
         } => {
+            let index = index.as_ref().map_or(String::new(), |i| format!("{i}, "));
             format!(
-                "for {name} in {} {}",
+                "for {index}{name} in {} {}",
                 print_expr_at(iter, indent),
                 print_block(body, indent)
             )

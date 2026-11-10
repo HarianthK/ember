@@ -208,6 +208,13 @@ fn printing_and_reparsing_is_stable() {
     }
 }
 
+// The printer used to drop the index, which the round trip above can't see: both passes lost it.
+#[test]
+fn for_prints_its_index() {
+    let printed = print_stmts(&parse("for i, v in xs { print(i); }").unwrap(), 0);
+    assert!(printed.starts_with("for i, v in xs {"), "{printed}");
+}
+
 // A function literal inside another used to print its body at the outer level.
 #[test]
 fn nested_functions_are_indented() {
