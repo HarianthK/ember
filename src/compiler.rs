@@ -79,8 +79,13 @@ impl FnState {
     }
 }
 
+// How deep an expression's tree may go: a + b + c + ... is as deep as it is long.
+const MAX_DEPTH: usize = 5000;
+
 pub struct Compiler {
     states: Vec<FnState>,
+    // How many expressions deep the one being compiled sits.
+    depth: usize,
     // The span of the statement being compiled, for expressions that carry none of their own.
     at: Span,
     source: &'static str,
@@ -586,7 +591,21 @@ impl Compiler {
         }
     }
 
+    // Refuses a tree deeper than the Rust stack could follow, as the parser does for nesting.
     fn expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
+        if self.depth == MAX_DEPTH {
+            return Err(CompileError {
+                message: "this expression is too long or too deeply nested to compile".into(),
+                at: self.at,
+            });
+        }
+        self.depth += 1;
+        let compiled = self.one_expr(expr);
+        self.depth -= 1;
+        compiled
+    }
+
+    fn one_expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
             Expr::Number(n) => {
                 let k = self.st().chunk.constant(Value::Number(*n));
@@ -828,6 +847,7 @@ fn compile_script(
     script.chunk.source = source;
     let mut c = Compiler {
         states: vec![script],
+        depth: 0,
         at: Span { line: 1, col: 1 },
         source,
     };

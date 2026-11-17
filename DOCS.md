@@ -676,3 +676,35 @@ Seven breakages fail the tests: a left-out end read as 0, a left-out start read
 as 1, the two ends popped or compiled the wrong way round, the end parsed and
 then dropped, the printer losing the colon, and `slice()` with two arguments
 passing its start as the end too.
+
+## How deep a program may nest
+
+The parser, the compiler and the printer all recurse, one Rust call or several
+for each level a program nests. Nothing limited that, so a deep enough program
+overflowed the Rust stack, which ends the process with no ember error at all.
+Deep enough was not much: the main thread has 1 MB on Windows and a debug
+build's frames are large, so `cargo run` died at 64 nested brackets, 80 nested
+blocks, or a sum of 175 terms. A release build got to 555 brackets and 4,226
+terms.
+
+Three changes, each for a different path:
+
+- The parser counts how many statements, assignments and prefixed expressions
+  are open at once and refuses the 1,001st with "nested too deeply". Every
+  way the grammar can contain itself passes through one of those three rules.
+- A chain such as `a + b + c` or `x.a.b.c` is read by a loop, so the parser
+  never goes deep, but the tree it builds leans left and is as deep as the
+  chain is long. The compiler recurses down it, so it counts too, and refuses
+  past 5,000 levels.
+- `main` runs everything on a thread with a 256 MB stack, which is address
+  space, not memory, until it is used. A debug build measured about 16 KB of
+  stack for each nested bracket and 6 KB for each term of a chain, so both
+  limits fit with room to spare.
+
+Counting chain links in the parser instead does not work: a link adds depth to
+everything on its left, which was already parsed and checked.
+
+Two paths are still unguarded and still overflow, at far larger sizes: `--parse`
+on a chain of hundreds of thousands of terms, since the printer runs before the
+compiler would refuse it, and printing a list nested a million deep that a loop
+built at run time. A hundred thousand deep prints.

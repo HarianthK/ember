@@ -167,3 +167,51 @@ fn try_prints_back_as_it_was_written() {
     // catch needs a name to put the error in.
     assert!(parse("try { } catch { }").is_err());
 }
+
+// Reading a program recurses as deep as it nests, so 64 brackets used to overflow the stack
+// in a debug build and end the process with no message. Each shape here is its own path.
+#[test]
+fn nesting_too_deep_is_an_error_not_a_crash() {
+    ember::on_a_deep_stack(|| {
+        let wrapped = |open: &str, close: &str| open.repeat(3000) + "1" + &close.repeat(3000);
+        for src in [
+            wrapped("(", ")"),
+            wrapped("[", "]"),
+            wrapped("{", "}"),
+            wrapped("-", ""),
+            wrapped("2 ** ", ""),
+            wrapped("x = ", ""),
+            wrapped("if 1 {} else ", ""),
+            wrapped("f(", ")"),
+        ] {
+            let shown = &src[..12];
+            assert!(err(&src).contains("nested too deeply"), "{shown}");
+        }
+        // A chain nests nothing as it is read, but its tree is as deep as it is long.
+        let sum = vec!["1"; 20_000].join(" + ");
+        assert!(err(&sum).contains("too long or too deeply nested to compile"));
+        // What a person would write is nowhere near either limit.
+        let src = format!("print({}7{})", "[(".repeat(100), ")]".repeat(100));
+        assert_eq!(
+            out(&src),
+            [format!("{}7{}", "[".repeat(100), "]".repeat(100))]
+        );
+        let sum = format!("print({})", vec!["1"; 3000].join(" + "));
+        assert_eq!(out(&sum), ["3000"]);
+    });
+}
+
+// The program itself, not the library: in a debug build 300 brackets is past what the main
+// thread's stack held, so this fails if main stops moving the work to a deeper one.
+#[test]
+fn the_program_reads_nesting_the_main_thread_could_not() {
+    let path = std::env::temp_dir().join("ember-deep-nesting.em");
+    let src = format!("print({}7{})", "(".repeat(300), ")".repeat(300));
+    std::fs::write(&path, src).unwrap();
+    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_ember"))
+        .arg(&path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).ok();
+    assert_eq!(String::from_utf8_lossy(&ran.stdout).trim(), "7", "{ran:?}");
+}

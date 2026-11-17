@@ -46,9 +46,13 @@ fn infix_power(tok: &Tok) -> Option<(BinOp, u8)> {
     Some(pair)
 }
 
+// How many statements and expressions may sit inside one another. DOCS.md has the sizes.
+const MAX_NESTING: usize = 1000;
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    nesting: usize,
 }
 
 impl Parser {
@@ -56,7 +60,23 @@ impl Parser {
         Ok(Parser {
             tokens: tokenize(src)?,
             pos: 0,
+            nesting: 0,
         })
+    }
+
+    // Runs one rule that can contain itself, refusing a program nested deeper than the
+    // Rust stack could follow, which would otherwise end the process without a message.
+    fn nested<T>(&mut self, rule: fn(&mut Self) -> Result<T, ParseError>) -> Result<T, ParseError> {
+        if self.nesting == MAX_NESTING {
+            return Err(ParseError {
+                message: "this is nested too deeply for me to read".into(),
+                at: self.at(),
+            });
+        }
+        self.nesting += 1;
+        let parsed = rule(self);
+        self.nesting -= 1;
+        parsed
     }
 
     fn peek(&self) -> &Tok {
@@ -133,6 +153,10 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, ParseError> {
+        self.nested(Self::one_statement)
+    }
+
+    fn one_statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek().clone() {
             Tok::Let => {
                 let at = self.at();
@@ -302,6 +326,10 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr, ParseError> {
+        self.nested(Self::one_assignment)
+    }
+
+    fn one_assignment(&mut self) -> Result<Expr, ParseError> {
         let left = self.binary(0)?;
         let op = match self.peek() {
             Tok::Assign => None,
@@ -349,6 +377,10 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, ParseError> {
+        self.nested(Self::one_unary)
+    }
+
+    fn one_unary(&mut self) -> Result<Expr, ParseError> {
         match self.peek() {
             Tok::Minus => {
                 let at = self.at();

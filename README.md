@@ -126,7 +126,7 @@ and the others.
 
 ## Checking it
 
-159 tests, one file per part of the language: parsing, the chunk, running
+163 tests, one file per part of the language: parsing, the chunk, running
 expressions, calls, closures, lists, slices, maps, loops, errors, the collector, the
 REPL and the standard library. Five more run every program on both the VM and the
 tree-walker, which share only the parser, and require the same output. They all pass a

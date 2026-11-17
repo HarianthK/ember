@@ -19,6 +19,17 @@ impl fmt::Display for Error {
     }
 }
 
+/// Runs `work` on a thread with a 256 MB stack, because reading a program recurses as deep
+/// as the program nests and the main thread's stack is 1 MB on Windows. DOCS.md has more.
+pub fn on_a_deep_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(work)
+        .expect("a thread to run on")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
 /// Runs one REPL entry on a VM that keeps its globals between entries. Returns the
 /// value of a closing bare expression, as the REPL shows it, unless that value is nil.
 pub fn repl_line(vm: &mut vm::Vm, src: &str) -> Result<Option<String>, Error> {

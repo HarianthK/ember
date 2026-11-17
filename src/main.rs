@@ -41,6 +41,10 @@ fn repl() -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    ember::on_a_deep_stack(run)
+}
+
+fn run() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
         if args.is_empty() {
