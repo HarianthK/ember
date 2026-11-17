@@ -374,8 +374,7 @@ impl Vm {
 
     // Runs only between instructions. By then every live value is on the stack, in a
     // global or in an open upvalue, so those are all the roots there are; no half-built
-    // value can be sitting in a Rust variable where marking cannot see it. A running
-    // frame's closure needs no root of its own: it sits in the frame's slot 0 on the stack.
+    // value can be sitting in a Rust variable where marking cannot see it.
     pub fn collect(&mut self) {
         let mut roots: Vec<Ref> = Vec::new();
         let handle = |v: &Value| match v {
@@ -385,6 +384,9 @@ impl Vm {
         roots.extend(self.stack.iter().filter_map(handle));
         roots.extend(self.globals.iter().flatten().filter_map(handle));
         roots.extend(self.open_upvalues.iter().copied());
+        // A function can assign to its own name, which is its slot 0, so the stack alone
+        // does not keep a running closure alive.
+        roots.extend(self.frames.iter().map(|frame| frame.closure));
         self.heap.mark(roots);
         self.heap.sweep();
     }

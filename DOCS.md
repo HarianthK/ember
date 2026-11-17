@@ -326,6 +326,24 @@ stack, which is a root already. A root that no program can make matter only hide
 the assumption it depends on, so it is gone, and the assumption is written where
 the roots are.
 
+That was wrong, and a later review found the program that makes it matter. Slot 0
+is not only where the closure sits, it is also the local the function's own name
+resolves to, so a function can assign to it:
+
+    fn make() {
+      let x = [1, 2, 3]
+      fn g() { g = 0; let junk = [9]; return x }
+      return g
+    }
+    print(make()())
+
+After `g = 0` nothing on the stack holds the running closure. The next
+collection freed it and the upvalue holding `x`, and `return x` read a freed
+handle: a panic in stress mode, and in a long normal run a slot some other
+object had since taken. The frames are a root again, with this program as the
+test. "No program can make it matter" was a claim about every program, and the
+count of failing tests could only ever speak for the programs in the suite.
+
 ## Phase 5: the finish
 
 ### The REPL is the same machine, kept

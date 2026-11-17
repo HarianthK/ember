@@ -155,3 +155,25 @@ fn an_upvalue_whose_closure_was_dropped_survives_until_its_scope_ends() {
     );
     assert_eq!(vm.output, ["[1]"]);
 }
+
+// A function may assign to its own name, which is its slot 0, so the stack no longer holds
+// the running closure and only the frame does. Freed, it took the captured list with it.
+#[test]
+fn a_function_that_overwrites_its_own_name_keeps_running() {
+    let mut vm = Vm::new();
+    vm.heap.stress = true;
+    run_in(
+        &mut vm,
+        "fn make() {
+  let x = [1, 2, 3]
+  fn g() {
+    g = 0
+    let junk = [9]
+    return x
+  }
+  return g
+}
+print(make()())",
+    );
+    assert_eq!(vm.output, ["[1, 2, 3]"]);
+}
