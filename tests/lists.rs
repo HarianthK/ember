@@ -186,6 +186,11 @@ fn star_repeats_a_list_or_a_string() {
         out("let grid = [[0]] * 3\npush(grid[0], 1)\nprint(grid)"),
         ["[[0, 1], [0, 1], [0, 1]]"]
     );
+    // An empty list or string stays empty at once, however many times: this used to count to 1e18.
+    assert_eq!(
+        out(r#"print([] * 1000000000000000000, "" * 1000000000000000000)"#),
+        ["[] "]
+    );
     // Numbers still multiply, and the mistakes say what was wrong.
     assert_eq!(out("print(6 * 7)"), ["42"]);
     assert!(

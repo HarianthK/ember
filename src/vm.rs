@@ -233,7 +233,8 @@ impl Vm {
                 "repeating that {times} times would make something too long"
             )));
         }
-        let times = times as usize;
+        // Nothing repeated is nothing, without counting to a number that may be astronomical.
+        let times = if size == 0 { 0 } else { times as usize };
         Ok(match thing {
             Value::Str(s) => Value::Str(s.repeat(times)),
             Value::List(r) => {
@@ -1410,14 +1411,14 @@ fn native_num(_vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
 // range(n) is 0 up to n; range(a, b) is a up to b. The end is never included, as in Python.
 fn native_range(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
     let whole = |v: &Value| match v {
-        Value::Number(n) if n.fract() == 0.0 => Ok(*n as i64),
+        Value::Number(n) if n.fract() == 0.0 => Ok(*n),
         other => Err(format!(
             "range needs whole numbers, not {}",
             vm.heap.show(other)
         )),
     };
     let (from, to) = match args {
-        [end] => (0, whole(end)?),
+        [end] => (0.0, whole(end)?),
         [start, end] => (whole(start)?, whole(end)?),
         _ => {
             return Err(format!(
@@ -1426,7 +1427,13 @@ fn native_range(vm: &mut Vm, args: &[Value]) -> Result<Value, String> {
             ));
         }
     };
-    let items = (from..to.max(from))
+    // Refused rather than attempted, as a repeat that long is: it would run out of memory.
+    if to - from > 100_000_000.0 {
+        return Err(format!(
+            "range from {from} to {to} would make a list too long"
+        ));
+    }
+    let items = (from as i64..(to as i64).max(from as i64))
         .map(|i| Value::Number(i as f64))
         .collect();
     Ok(vm.new_list(items))

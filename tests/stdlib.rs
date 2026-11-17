@@ -36,6 +36,9 @@ print(total)";
     assert_eq!(out(src), ["5050"]);
     assert!(err("range(1.5)").contains("range needs whole numbers, not 1.5"));
     assert!(err("range()").contains("range takes 1 or 2 arguments, but was given 0"));
+    // Refused, as [0] * 1e12 is: asking for the memory used to end the whole process.
+    assert!(err("range(1000000000000)").contains("would make a list too long"));
+    assert!(err("range(-1000000000000, 0)").contains("would make a list too long"));
 }
 
 #[test]

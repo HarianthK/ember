@@ -508,6 +508,12 @@ and this is the same idea. And a result over a hundred million items or bytes
 is refused before it is attempted, since `[0] * 1e12` would otherwise run the
 machine out of memory rather than report anything.
 
+Two holes in that turned up later. The size check multiplies the length by the
+count, so for an empty list it always passed, and `[] * 1e18` then looped 1e18
+times adding nothing; an empty thing now repeats zero times whatever the count.
+And `range` had no such check at all, so `range(1e12)` asked for 24 terabytes
+and the process died without a message. It has the same limit now.
+
 One Python behaviour is kept on purpose, because changing it would surprise
 anyone who knows Python: `[[0]] * 3` is three references to the same inner
 list, so pushing to one changes all three. The test pins that down.
