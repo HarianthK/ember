@@ -404,7 +404,10 @@ impl<'a> Lexer<'a> {
                 // The whole character, not its first byte: é is two bytes and its first alone is "Ã".
                 let rest = std::str::from_utf8(&self.src[self.pos - 1..]).unwrap_or("?");
                 return Err(LexError {
-                    message: format!("I do not know what to do with {:?}", rest.chars().next().unwrap_or('?')),
+                    message: format!(
+                        "I do not know what to do with {:?}",
+                        rest.chars().next().unwrap_or('?')
+                    ),
                     at,
                 });
             }

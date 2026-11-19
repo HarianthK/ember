@@ -35,7 +35,10 @@ x **= 3
 print(x)";
     assert_eq!(out(src), ["64"]);
     // + joins strings and lists, so += does too, and the result is the value of the expression.
-    assert_eq!(out("let s = \"a\"\ns += \"b\"\nprint(s += \"c\", s)"), ["abc abc"]);
+    assert_eq!(
+        out("let s = \"a\"\ns += \"b\"\nprint(s += \"c\", s)"),
+        ["abc abc"]
+    );
     assert_eq!(out("let xs = [1]\nxs += [2, 3]\nprint(xs)"), ["[1, 2, 3]"]);
     // The tree-walker, which shares only the parser, gets the same answer.
     assert_eq!(Walker::run(src).unwrap(), ["64"]);
@@ -93,17 +96,29 @@ print(xs, m.k, calls)";
     assert_eq!(out(src), ["[10, 25] 3 10101"]);
     // Nothing is left on the stack after many of them, in a function and at the top.
     assert_eq!(
-        leftover("let xs = [0, 0]\nfn f() { let m = {\"n\": 0}; for i in range(50) { xs[i % 2] += i; m.n += 1 } }\nf()\nf()"),
+        leftover(
+            "let xs = [0, 0]\nfn f() { let m = {\"n\": 0}; for i in range(50) { xs[i % 2] += i; m.n += 1 } }\nf()\nf()"
+        ),
         0
     );
 }
 
 #[test]
 fn errors_name_what_is_missing() {
-    assert!(err("nope += 1").starts_with("nope is not defined"), "{}", err("nope += 1"));
-    assert!(err("let m = {}\nm.count += 1").contains("count"), "{}", err("let m = {}\nm.count += 1"));
+    assert!(
+        err("nope += 1").starts_with("nope is not defined"),
+        "{}",
+        err("nope += 1")
+    );
+    assert!(
+        err("let m = {}\nm.count += 1").contains("count"),
+        "{}",
+        err("let m = {}\nm.count += 1")
+    );
     assert!(err("let xs = [1]\nxs[3] += 1").contains("out of range"));
-    assert!(err("let s = \"a\"\ns -= 1").starts_with("- needs two numbers, not a string and a number"));
+    assert!(
+        err("let s = \"a\"\ns -= 1").starts_with("- needs two numbers, not a string and a number")
+    );
     // Only a name, an item or a field can be updated, and the two characters must touch.
     assert!(parse("1 += 2").is_err());
     assert!(parse("let x = 1\nx + = 2").is_err());
