@@ -519,6 +519,8 @@ impl Vm {
                         Err("zero to a negative power")
                     } else if x < 0.0 && y.fract() != 0.0 {
                         Err("a negative number to a fractional power")
+                    } else if x.powf(y).is_infinite() {
+                        Err("the result of ** is too large to hold")
                     } else {
                         Ok(Value::Number(x.powf(y)))
                     }

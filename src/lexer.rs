@@ -172,6 +172,11 @@ impl<'a> Lexer<'a> {
         *self.src.get(self.pos).unwrap_or(&0)
     }
 
+    // peek() gives 0 past the end, but a 0 byte in the source is not the end; ask this instead.
+    fn at_end(&self) -> bool {
+        self.pos >= self.src.len()
+    }
+
     fn peek_next(&self) -> u8 {
         *self.src.get(self.pos + 1).unwrap_or(&0)
     }
@@ -204,7 +209,7 @@ impl<'a> Lexer<'a> {
                 }
                 // Comments run to the end of the line; there is no block comment.
                 b'/' if self.peek_next() == b'/' => {
-                    while self.peek() != b'\n' && self.peek() != 0 {
+                    while self.peek() != b'\n' && !self.at_end() {
                         self.bump();
                     }
                 }
@@ -227,6 +232,11 @@ impl<'a> Lexer<'a> {
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         match text.parse::<f64>() {
+            // Past about 1.8e308 the parse gives infinity rather than failing.
+            Ok(n) if n.is_infinite() => Err(LexError {
+                message: format!("{} digits make a number too large to hold", text.len()),
+                at,
+            }),
             Ok(n) => Ok(Token {
                 tok: Tok::Number(n),
                 at,
@@ -246,7 +256,7 @@ impl<'a> Lexer<'a> {
         let mut out = Vec::new();
         loop {
             match self.peek() {
-                0 => {
+                0 if self.at_end() => {
                     return Err(LexError {
                         message: "this string is never closed".into(),
                         at,
@@ -322,7 +332,7 @@ impl<'a> Lexer<'a> {
         self.skip_blank();
         let at = self.here();
         let c = self.peek();
-        if c == 0 {
+        if self.at_end() {
             return Ok(Token { tok: Tok::Eof, at });
         }
         if c.is_ascii_digit() {
@@ -390,9 +400,11 @@ impl<'a> Lexer<'a> {
                 Tok::GreaterEq
             }
             b'>' => Tok::Greater,
-            other => {
+            _ => {
+                // The whole character, not its first byte: é is two bytes and its first alone is "Ã".
+                let rest = std::str::from_utf8(&self.src[self.pos - 1..]).unwrap_or("?");
                 return Err(LexError {
-                    message: format!("I do not know what to do with {:?}", other as char),
+                    message: format!("I do not know what to do with {:?}", rest.chars().next().unwrap_or('?')),
                     at,
                 });
             }

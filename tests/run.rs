@@ -74,6 +74,10 @@ fn runtime_errors_say_what_and_where() {
     assert!(err("print(-\"a\")").contains("- needs a number, not a string"));
     assert!(err("print(1 / 0)").contains("division by zero"));
     assert!(err("print(0 ** -1)").contains("zero to a negative power"));
+    // Too large for a float came out as "inf", by power or by a long literal.
+    assert!(err("print(10 ** 400)").contains("too large"));
+    assert!(err(&format!("print({})", "9".repeat(400))).contains("too large"));
+    assert_eq!(out("print(10 ** 300 > 1)"), ["true"]);
     assert!(err("print((-8) ** 0.5)").contains("a negative number to a fractional power"));
     assert!(err("print(2 ** \"a\")").contains("** needs two numbers, not a number and a string"));
     assert!(err("print(1 < nil)").contains("< needs two numbers"));

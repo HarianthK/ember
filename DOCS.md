@@ -604,8 +604,11 @@ which gets both wrong. So `**` has its own small level between unary and
 postfix: it parses the base as a postfix expression, and the exponent by going
 back up to unary, which allows `2 ** -1` and, by recursing, the right grouping.
 
-Two results are refused rather than returned. `0 ** -1` is an error, the way
-division by zero already is, instead of an infinity. A negative number to a
+Three results are refused rather than returned. `0 ** -1` is an error, the way
+division by zero already is, instead of an infinity, and so is a power too large
+for a float, `10 ** 400`, which printed `inf` until a review caught it; a number
+literal of more than about 309 digits is refused by the lexer for the same
+reason. A negative number to a
 fractional power, `(-8) ** 0.5`, has no real answer and would be NaN, which
 then compares unequal to everything and spreads silently, so it is an error
 too. `(-8) ** 2` is fine: only a fraction of a negative base is refused. The
@@ -708,3 +711,15 @@ Two paths are still unguarded and still overflow, at far larger sizes: `--parse`
 on a chain of hundreds of thousands of terms, since the printer runs before the
 compiler would refuse it, and printing a list nested a million deep that a loop
 built at run time. A hundred thousand deep prints.
+
+## The end of the source is not a 0 byte
+
+The lexer's `peek` returns 0 past the end of the source, and three places took
+any 0 byte for the end: the token loop, the comment skipper and the string
+reader. So a NUL in the middle of a file ended the program there, silently, and
+everything after it was never run or even checked. They now ask `at_end`,
+which compares the position with the length. A NUL outside a string is an
+unknown character, as anything else would be; inside a comment it is skipped
+and inside a string it is kept. The unknown-character message also showed only
+the first byte of a character, so `é` came out as `Ã`; it now shows the whole
+character.

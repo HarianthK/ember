@@ -215,3 +215,17 @@ fn the_program_reads_nesting_the_main_thread_could_not() {
     std::fs::remove_file(&path).ok();
     assert_eq!(String::from_utf8_lossy(&ran.stdout).trim(), "7", "{ran:?}");
 }
+
+// The lexer took a 0 byte for the end of input, so anything after a NUL was silently dropped.
+#[test]
+fn a_nul_byte_is_an_error_not_the_end_of_the_program() {
+    assert!(err("print(1)\0print(2)").contains(r"do not know what to do with '\0'"));
+    assert_eq!(out("print(1) // a\0b\nprint(2)"), ["1", "2"]);
+    assert_eq!(out("print(len(\"a\0b\"))"), ["3"]);
+}
+
+// A character outside a string was shown one byte at a time, so é came out as "Ã".
+#[test]
+fn an_unknown_character_is_shown_whole() {
+    assert!(err("print(1) é").contains("'é'"), "{}", err("print(1) é"));
+}
